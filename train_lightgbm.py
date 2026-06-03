@@ -95,6 +95,11 @@ def main():
     df_feat = fe.transform(df_raw)
     print(f"✅ Sinh đặc trưng hoàn thành! Kích thước dữ liệu mới: {df_feat.shape}\n")
     
+    # Giải phóng raw data ngay lập tức
+    del df_raw
+    import gc
+    gc.collect()
+    
     comparison_table = []
     
     # 3. Huấn luyện và đánh giá từng chất khí
@@ -102,32 +107,38 @@ def main():
         disp_name = TARGET_DISPLAY_NAMES[target]
         print(f"\n🌲 Đang huấn luyện LightGBM cho chất khí: {disp_name}...")
         
+        # Lấy danh sách các cột đặc trưng từ FeatureEngineer
+        raw_feature_cols = fe.get_feature_columns(df_feat)
+        
+        # Ép kiểu dữ liệu nguồn (source) sang category để LightGBM tự nhận diện
+        source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
+                
+        # Lọc đặc trưng: chỉ giữ lại các cột số và cột phân loại (category)
+        feature_cols = []
+        for c in raw_feature_cols:
+            if any(c.startswith(f"{g}_t+") for g in TARGET_COLUMNS):
+                continue
+            dtype = df_feat[c].dtype
+            if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
+                feature_cols.append(c)
+                
+        # Chỉ copy các cột thực sự cần dùng để giảm tải RAM tối đa
+        cols_to_keep = list(set(feature_cols + ["city", "station_id", "timestamp", target] + source_cols))
+        cols_to_keep = [c for c in cols_to_keep if c in df_feat.columns]
+        
+        df_target = df_feat[cols_to_keep].copy()
+        
+        for col in source_cols:
+            if col in df_target.columns:
+                df_target[col] = df_target[col].astype("category")
+                
         # Tạo dữ liệu trượt dự báo 24h tương lai (y) bằng shift(-h)
         y_cols = []
-        df_target = df_feat.copy()
         for h in range(1, 25):
             col_name = f"{target}_t+{h}"
             df_target[col_name] = df_target.groupby(["city", "station_id"])[target].shift(-h)
             y_cols.append(col_name)
             
-        # Lấy danh sách các cột đặc trưng từ FeatureEngineer
-        raw_feature_cols = fe.get_feature_columns(df_target)
-        
-        # Ép kiểu dữ liệu nguồn (source) sang category để LightGBM tự nhận diện
-        source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
-        for col in source_cols:
-            if col in df_target.columns:
-                df_target[col] = df_target[col].astype("category")
-                
-        # Lọc đặc trưng: chỉ giữ lại các cột số và cột phân loại (category), loại bỏ các cột target hiện tại
-        feature_cols = []
-        for c in raw_feature_cols:
-            if c in y_cols:
-                continue
-            dtype = df_target[c].dtype
-            if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
-                feature_cols.append(c)
-                
         # Loại bỏ các dòng bị khuyết nhãn target tương lai hoặc đặc trưng
         df_clean = df_target.dropna(subset=feature_cols + y_cols).reset_index(drop=True)
         
@@ -149,6 +160,16 @@ def main():
         
         X_test_hn = df_test_hanoi[feature_cols].copy()
         y_test_hn = df_test_hanoi[y_cols].copy()
+        
+        # Giải phóng các dataframe trung gian lớn
+        del df_target
+        del df_clean
+        del df_train
+        del df_val
+        del df_test
+        del df_val_hanoi
+        del df_test_hanoi
+        gc.collect()
         
         # Cấu hình LightGBM: sử dụng bộ tối ưu từ Optuna nếu có, ngược lại dùng mặc định
         best_params_path = f"models/lightgbm/best_params_{target}.json"
@@ -214,6 +235,15 @@ def main():
         print(f"      - LightGBM Val  (2025/01-2025/09): MAE = {mae_val:.2f} | RMSE = {rmse_val:.2f}")
         print(f"      - LightGBM Test (2025/10-2026/04): MAE = {mae_test:.2f} | RMSE = {rmse_test:.2f} 🌟")
         print(f"      - TFT Model (Best - Full 20%):     MAE = {tft_mae:.2f} | RMSE = {tft_rmse:.2f}")
+        
+        # Giải phóng dữ liệu huấn luyện của khí hiện tại để chuẩn bị cho khí tiếp theo
+        del X_train
+        del y_train
+        del X_val_hn
+        del y_val_hn
+        del X_test_hn
+        del y_test_hn
+        gc.collect()
         
     # ── IN BẢNG ĐỐI CHIẾU TỔNG HỢP ──────────────────────────────────────────
     print("\n" + "═" * 125)

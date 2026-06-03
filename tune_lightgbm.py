@@ -66,43 +66,43 @@ def load_and_combine_datasets():
 TARGET_COLUMNS = ["pm25_obs", "pm10_obs", "no2_pseudo", "so2_pseudo", "co_pseudo", "o3_pseudo"]
 REPRESENTATIVE_HORIZONS = [1, 6, 12, 24]
 
-def tune_gas(target_gas, n_trials=30):
+def tune_gas(df_feat, target_gas, n_trials=30):
     logger.info(f"🚀 Bắt đầu tối ưu hóa siêu tham số cho: {target_gas} với {n_trials} trials")
     
-    # 1. Load và gộp dữ liệu thô
-    df_raw = load_and_combine_datasets()
-    
-    # 2. Sinh đặc trưng nâng cao bằng FeatureEngineer
-    logger.info("🛠️ Đang chạy Feature Engineering...")
+    # 1. Lấy danh sách đặc trưng từ FeatureEngineer
     fe = FeatureEngineer()
-    df_feat = fe.transform(df_raw)
+    raw_feature_cols = fe.get_feature_columns(df_feat)
     
-    # 3. Chuẩn bị targets và features
-    # Tạo targets cho các bước đại diện
+    # Ép kiểu source sang category
+    source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
+            
+    # Lọc đặc trưng số và category
+    feature_cols = []
+    for c in raw_feature_cols:
+        # Không lấy các cột target t+ của các khí khác
+        if any(c.startswith(f"{g}_t+") for g in TARGET_COLUMNS):
+            continue
+        dtype = df_feat[c].dtype
+        if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
+            feature_cols.append(c)
+            
+    # Chỉ copy các cột thực sự cần dùng để giảm tải RAM tối đa
+    cols_to_keep = list(set(feature_cols + ["city", "station_id", "timestamp", target_gas] + source_cols))
+    cols_to_keep = [c for c in cols_to_keep if c in df_feat.columns]
+    
+    df_target = df_feat[cols_to_keep].copy()
+    
+    for col in source_cols:
+        if col in df_target.columns:
+            df_target[col] = df_target[col].astype("category")
+            
+    # 2. Tạo targets cho các bước đại diện
     y_cols = []
-    df_target = df_feat.copy()
     for h in REPRESENTATIVE_HORIZONS:
         col_name = f"{target_gas}_t+{h}"
         df_target[col_name] = df_target.groupby(["city", "station_id"])[target_gas].shift(-h)
         y_cols.append(col_name)
         
-    raw_feature_cols = fe.get_feature_columns(df_target)
-    
-    # Ép kiểu source sang category
-    source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
-    for col in source_cols:
-        if col in df_target.columns:
-            df_target[col] = df_target[col].astype("category")
-            
-    # Lọc đặc trưng số và category
-    feature_cols = []
-    for c in raw_feature_cols:
-        if c in y_cols:
-            continue
-        dtype = df_target[c].dtype
-        if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
-            feature_cols.append(c)
-            
     # Drop rows with NaN targets/features
     df_clean = df_target.dropna(subset=feature_cols + y_cols).reset_index(drop=True)
     
@@ -119,6 +119,14 @@ def tune_gas(target_gas, n_trials=30):
     X_val_hn = df_val_hn[feature_cols].copy()
     y_val_hn = df_val_hn[y_cols].copy()
     
+    # Giải phóng các dataframe trung gian ngay lập tức
+    del df_target
+    del df_clean
+    del df_train
+    del df_val
+    del df_val_hn
+    import gc
+    gc.collect()
     
     # 4. Định nghĩa hàm mục tiêu cho Optuna
     def objective(trial):
@@ -149,6 +157,7 @@ def tune_gas(target_gas, n_trials=30):
             mae = mean_absolute_error(y_val_hn[col_name], y_pred)
             maes.append(mae)
             
+        gc.collect()
         return np.mean(maes)
         
     study = optuna.create_study(direction="minimize")
@@ -167,6 +176,13 @@ def tune_gas(target_gas, n_trials=30):
         json.dump(study.best_params, f, indent=4, ensure_ascii=False)
         
     logger.info(f"💾 Đã lưu bộ siêu tham số tốt nhất vào: {best_params_path}")
+    
+    # Giải phóng dữ liệu huấn luyện của khí hiện tại
+    del X_train
+    del y_train
+    del X_val_hn
+    del y_val_hn
+    gc.collect()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Tự động tìm kiếm siêu tham số bằng Optuna cho LightGBM.")
@@ -176,10 +192,24 @@ if __name__ == "__main__":
                         help="Số lượng lượt chạy thử nghiệm của Optuna cho mỗi chất khí.")
                         
     args = parser.parse_args()
+    
+    # 1. Load và gộp dữ liệu thô (chỉ chạy 1 lần duy nhất)
+    df_raw = load_and_combine_datasets()
+    
+    # 2. Sinh đặc trưng nâng cao bằng FeatureEngineer
+    logger.info("🛠️ Đang chạy Feature Engineering cho toàn bộ dữ liệu...")
+    fe = FeatureEngineer()
+    df_feat = fe.transform(df_raw)
+    
+    # Giải phóng raw data
+    del df_raw
+    import gc
+    gc.collect()
+    
     if args.gas == "all":
         logger.info("🌟 BẮT ĐẦU TỐI ƯU HÓA SIÊU THAM SỐ CHO TOÀN BỘ 6 CHẤT KHÍ 🌟")
         for gas in TARGET_COLUMNS:
-            tune_gas(gas, args.trials)
+            tune_gas(df_feat, gas, args.trials)
         logger.info("🎉 ĐÃ HOÀN TẤT TỐI ƯU HÓA CHO TOÀN BỘ 6 CHẤT KHÍ!")
     else:
-        tune_gas(args.gas, args.trials)
+        tune_gas(df_feat, args.gas, args.trials)
