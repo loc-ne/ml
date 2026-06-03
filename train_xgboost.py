@@ -170,13 +170,6 @@ def main():
             float_cols = df_tmp.select_dtypes(include=['float64']).columns
             df_tmp[float_cols] = df_tmp[float_cols].astype('float32')
             
-        # Trích xuất 10,000 dòng ngẫu nhiên từ tập Train để làm tập đánh giá Learning Curve (giảm cực lớn dung lượng DMatrix trong XGBoost)
-        np.random.seed(42)
-        eval_size = min(10000, len(X_train))
-        eval_indices = np.random.choice(len(X_train), eval_size, replace=False)
-        X_train_eval = X_train.iloc[eval_indices].copy()
-        y_train_eval = y_train.iloc[eval_indices].copy()
-        
         # Giải phóng các dataframe trung gian lớn
         del df_target
         del df_clean
@@ -222,10 +215,10 @@ def main():
             col_name = f"{target}_t+{h}"
             model_h = XGBRegressor(**params)
             
-            # Huấn luyện và thu thập log học tập trên tập đánh giá rút gọn
+            # Huấn luyện và thu thập log học tập trên toàn bộ tập dữ liệu (khớp với LightGBM)
             model_h.fit(
                 X_train, y_train[col_name],
-                eval_set=[(X_train_eval, y_train_eval[col_name]), (X_val_hn, y_val_hn[col_name])],
+                eval_set=[(X_train, y_train[col_name]), (X_val_hn, y_val_hn[col_name])],
                 eval_metric="mae",
                 verbose=False
             )
@@ -236,11 +229,6 @@ def main():
             
             models.append(model_h)
             gc.collect()
-            
-        # Giải phóng tập đánh giá tạm thời
-        del X_train_eval
-        del y_train_eval
-        gc.collect()
             
         # Vẽ và lưu biểu đồ Learning Curve (MAE trung bình qua 24 horizons)
         import matplotlib.pyplot as plt
