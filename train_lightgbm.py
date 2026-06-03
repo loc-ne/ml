@@ -190,24 +190,66 @@ def main():
             print(f"   ⚙️ Đang sử dụng bộ siêu tham số mặc định.")
             
         params.update({"random_state": 42, "n_jobs": -1, "verbose": -1})
-        lgbm = LGBMRegressor(**params)
         
-        # Wrap trong MultiOutputRegressor để dự báo 24h đồng thời
-        model = MultiOutputRegressor(lgbm)
-        model.fit(X_train, y_train)
+        # Train 24 mô hình độc lập cho 24 bước thời gian để vẽ Learning Curve
+        models = []
+        train_losses_all = []
+        val_losses_all = []
         
-        # Lưu mô hình đã huấn luyện
+        print(f"   ⚙️ Đang huấn luyện và theo dõi quá trình học (Learning Curve) cho 24 horizons...")
+        for h in range(1, 25):
+            col_name = f"{target}_t+{h}"
+            model_h = LGBMRegressor(**params)
+            
+            # Huấn luyện và thu thập log học tập
+            model_h.fit(
+                X_train, y_train[col_name],
+                eval_set=[(X_train, y_train[col_name]), (X_val_hn, y_val_hn[col_name])],
+                eval_metric="mae",
+                callbacks=[]
+            )
+            
+            evals_result = model_h.evals_result_
+            train_losses_all.append(evals_result['training']['l1'])
+            val_losses_all.append(evals_result['valid_1']['l1'])
+            
+            models.append(model_h)
+            
+        # Vẽ và lưu biểu đồ Learning Curve (MAE trung bình qua 24 horizons)
+        import matplotlib.pyplot as plt
+        avg_train_loss = np.mean(train_losses_all, axis=0)
+        avg_val_loss = np.mean(val_losses_all, axis=0)
+        
+        plt.figure(figsize=(10, 5))
+        plt.plot(range(1, len(avg_train_loss) + 1), avg_train_loss, label="Train MAE", color="#3b82f6", linewidth=2)
+        plt.plot(range(1, len(avg_val_loss) + 1), avg_val_loss, label="Val MAE", color="#ef4444", linewidth=2)
+        plt.title(f"Learning Curve for {disp_name} (Average over 24 horizons)", fontsize=12, fontweight="bold")
+        plt.xlabel("Boosting Rounds", fontsize=10)
+        plt.ylabel("MAE", fontsize=10)
+        plt.legend(fontsize=10)
+        plt.grid(True, linestyle="--", alpha=0.5)
+        
         model_dir = "models/lightgbm"
         os.makedirs(model_dir, exist_ok=True)
+        plot_path = os.path.join(model_dir, f"learning_curve_{target}.png")
+        plt.savefig(plot_path, dpi=200, bbox_inches="tight")
+        plt.close()
+        print(f"   📈 Đã vẽ và lưu biểu đồ quá trình học tại: {plot_path}")
+        
+        # Lưu toàn bộ danh sách 24 mô hình của chất khí này
         model_path = os.path.join(model_dir, f"lgbm_{target}.joblib")
-        joblib.dump(model, model_path)
+        joblib.dump(models, model_path)
         print(f"   💾 Đã lưu mô hình {disp_name} tại: {model_path}")
         
         # Dự báo 24 bước tương lai trên tập Val & Test của Hà Nội
-        y_pred_val = model.predict(X_val_hn)
-        y_pred_val = np.clip(y_pred_val, 0.0, None)
+        y_pred_val = np.zeros((len(X_val_hn), 24))
+        y_pred_test = np.zeros((len(X_test_hn), 24))
         
-        y_pred_test = model.predict(X_test_hn)
+        for idx, model_h in enumerate(models):
+            y_pred_val[:, idx] = model_h.predict(X_val_hn)
+            y_pred_test[:, idx] = model_h.predict(X_test_hn)
+            
+        y_pred_val = np.clip(y_pred_val, 0.0, None)
         y_pred_test = np.clip(y_pred_test, 0.0, None)
         
         # Tính toán sai số trung bình trên Hà Nội
