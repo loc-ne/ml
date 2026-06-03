@@ -47,7 +47,11 @@ LAG_HOURS = [1, 2, 3, 6, 12, 24, 48, 168]  # 168h = 1 tuần
 ROLL_WINDOWS = [3, 6, 12, 24]
 
 # Chỉ số chính cần tạo lag
-PRIMARY_PARAMS = ["pm25", "pm10", "no2", "o3"]
+# Các khí dùng cột quan trắc _obs để tạo đặc trưng trễ (do ít khuyết)
+OBS_LAG_PARAMS = ["pm25", "pm10"]
+
+# Các khí dùng cột giả lập _pseudo để tạo đặc trưng trễ (do cột _obs khuyết nặng)
+PSEUDO_LAG_PARAMS = ["no2", "o3", "so2", "co"]
 
 # Horizon dự báo
 FORECAST_HORIZONS = list(range(1, 25))  # 1h đến 24h
@@ -244,17 +248,29 @@ class FeatureEngineer:
         df = df.copy()
         station_groups = df.groupby("station_id", sort=False) if "station_id" in df.columns else None
 
-        for param in PRIMARY_PARAMS:
-            obs_col = f"{param}_obs"
-            if obs_col not in df.columns:
+        # 1. Tạo lag cho nhóm obs
+        for param in OBS_LAG_PARAMS:
+            col = f"{param}_obs"
+            if col not in df.columns:
                 continue
 
             for h in LAG_HOURS:
-                # shift(h) lấy giá trị h bước TRƯỚC — đúng, không leakage
                 if station_groups is not None:
-                    df[f"{param}_lag_{h}h"] = station_groups[obs_col].shift(h)
+                    df[f"{param}_lag_{h}h"] = station_groups[col].shift(h)
                 else:
-                    df[f"{param}_lag_{h}h"] = df[obs_col].shift(h)
+                    df[f"{param}_lag_{h}h"] = df[col].shift(h)
+
+        # 2. Tạo lag cho nhóm pseudo
+        for param in PSEUDO_LAG_PARAMS:
+            col = f"{param}_pseudo"
+            if col not in df.columns:
+                continue
+
+            for h in LAG_HOURS:
+                if station_groups is not None:
+                    df[f"{param}_lag_{h}h"] = station_groups[col].shift(h)
+                else:
+                    df[f"{param}_lag_{h}h"] = df[col].shift(h)
 
         # Lag weather (gió và nhiệt độ lag quan trọng)
         for wx_col in ["wind_speed_ms", "temp_c", "pressure_hpa"]:
@@ -273,30 +289,33 @@ class FeatureEngineer:
     def _add_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Rolling mean, std, min, max trên các window.
-        QUAN TRỌNG: dùng shift(1) trước khi rolling để đảm bảo
-        không include giá trị hiện tại (tránh leakage).
         """
         df = df.copy()
         station_groups = df.groupby("station_id", sort=False) if "station_id" in df.columns else None
 
-        for param in PRIMARY_PARAMS:
-            obs_col = f"{param}_obs"
-            if obs_col not in df.columns:
-                continue
-
-            # Không shift 1 nữa, do ta lấy chính t hiện tại (được dự báo từ t+1 trở đi)
-            # Điều này không gây leakage vì pm25_obs(t) vốn nằm trong features
+        # Hàm helper sinh rolling features
+        def add_rolling(param, base_col):
+            if base_col not in df.columns:
+                return
             for w in ROLL_WINDOWS:
                 if station_groups is not None:
-                    rolled = station_groups[obs_col].rolling(window=w, min_periods=max(1, w//2))
+                    rolled = station_groups[base_col].rolling(window=w, min_periods=max(1, w//2))
                     df[f"{param}_roll_mean_{w}h"] = rolled.mean().reset_index(level=0, drop=True)
                     df[f"{param}_roll_std_{w}h"]  = rolled.std().reset_index(level=0, drop=True).fillna(0)
                     df[f"{param}_roll_max_{w}h"]  = rolled.max().reset_index(level=0, drop=True)
                 else:
-                    rolled = df[obs_col].rolling(window=w, min_periods=max(1, w//2))
+                    rolled = df[base_col].rolling(window=w, min_periods=max(1, w//2))
                     df[f"{param}_roll_mean_{w}h"] = rolled.mean()
                     df[f"{param}_roll_std_{w}h"]  = rolled.std().fillna(0)
                     df[f"{param}_roll_max_{w}h"]  = rolled.max()
+
+        # 1. Rolling cho nhóm obs
+        for param in OBS_LAG_PARAMS:
+            add_rolling(param, f"{param}_obs")
+
+        # 2. Rolling cho nhóm pseudo
+        for param in PSEUDO_LAG_PARAMS:
+            add_rolling(param, f"{param}_pseudo")
 
         # Rolling wind speed (gió trung bình gần đây)
         if "wind_speed_ms" in df.columns:
@@ -323,31 +342,26 @@ class FeatureEngineer:
 
     def _add_trend_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Tính slope của PM2.5 trong 6h qua.
-        Positive slope → đang tăng → nguy cơ cao hơn.
-        Dùng polyfit bậc 1 trên cửa sổ trượt.
+        Tính slope của các chỉ số ô nhiễm chính.
         """
         df = df.copy()
         station_groups = df.groupby("station_id", sort=False) if "station_id" in df.columns else None
 
-        for param in ["pm25", "no2"]:
-            obs_col = f"{param}_obs"
-            if obs_col not in df.columns:
-                continue
+        # PM2.5 (obs)
+        if "pm25_obs" in df.columns:
+            shifted = station_groups["pm25_obs"].shift(6) if station_groups is not None else df["pm25_obs"].shift(6)
+            df["pm25_trend_6h"] = (df["pm25_obs"] - shifted) / 6.0
+            df["pm25_rising_fast"] = (df["pm25_trend_6h"] > 20/6).astype(int)
 
-            # Slope 6h — dùng diff thay vì polyfit cho tốc độ
-            # Tính gộp thời điểm hiện tại `t` thay vì `t-1` - không bị target leakage vì target là `t+1`
-            if station_groups is not None:
-                shifted = station_groups[obs_col].shift(6)
-            else:
-                shifted = df[obs_col].shift(6)
-            df[f"{param}_trend_6h"] = (
-                df[obs_col] - shifted
-            ) / 6.0  # (t - t-6) / 6h
+        # NO2 (pseudo)
+        if "no2_pseudo" in df.columns:
+            shifted = station_groups["no2_pseudo"].shift(6) if station_groups is not None else df["no2_pseudo"].shift(6)
+            df["no2_trend_6h"] = (df["no2_pseudo"] - shifted) / 6.0
 
-            # Flag: đang tăng nhanh (> 20 µg/m³ trong 6h)
-            if param == "pm25":
-                df["pm25_rising_fast"] = (df["pm25_trend_6h"] > 20/6).astype(int)
+        # CO (pseudo)
+        if "co_pseudo" in df.columns:
+            shifted = station_groups["co_pseudo"].shift(6) if station_groups is not None else df["co_pseudo"].shift(6)
+            df["co_trend_6h"] = (df["co_pseudo"] - shifted) / 6.0
 
         return df
 

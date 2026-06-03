@@ -177,9 +177,10 @@ if __name__ == "__main__":
                         
     args = parser.parse_args()
     if args.gas == "all":
-        logger.info("🌟 BẮT ĐẦU TỐI ƯU HÓA SIÊU THAM SỐ CHO TOÀN BỘ 6 CHẤT KHÍ 🌟")
-        for gas in TARGET_COLUMNS:
+        logger.info("🌟 BẮT ĐẦU TỐI ƯU HÓA SIÊU THAM SỐ CHO 4 KHÍ CÒN LẠI (NO2, SO2, CO, O3) 🌟")
+        tuning_gases = ["no2_pseudo", "so2_pseudo", "co_pseudo", "o3_pseudo"]
+        for gas in tuning_gases:
             tune_gas(gas, args.trials)
-        logger.info("🎉 ĐÃ HOÀN TẤT TỐI ƯU HÓA CHO TOÀN BỘ 6 CHẤT KHÍ!")
+        logger.info("🎉 ĐÃ HOÀN TẤT TỐI ƯU HÓA CHO 4 KHÍ CÒN LẠI!")
     else:
         tune_gas(args.gas, args.trials)
