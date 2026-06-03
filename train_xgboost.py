@@ -202,7 +202,8 @@ def main():
             "n_jobs": -1,
             "tree_method": "hist",
             "device": DEVICE_NAME,
-            "enable_categorical": True
+            "enable_categorical": True,
+            "eval_metric": "mae"
         })
         
         # Train 24 mô hình độc lập cho 24 bước thời gian để vẽ Learning Curve
@@ -219,7 +220,6 @@ def main():
             model_h.fit(
                 X_train, y_train[col_name],
                 eval_set=[(X_train, y_train[col_name]), (X_val_hn, y_val_hn[col_name])],
-                eval_metric="mae",
                 verbose=False
             )
             
