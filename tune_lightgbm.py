@@ -27,7 +27,7 @@ except ImportError:
 
 try:
     import optuna
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    optuna.logging.set_verbosity(optuna.logging.INFO)
 except ImportError:
     print("❌ LỖI: Chưa cài đặt thư viện 'optuna'. Vui lòng chạy: pip install optuna")
     sys.exit(1)
