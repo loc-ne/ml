@@ -76,7 +76,7 @@ def tune_gas(df_feat, target_gas, n_trials=30):
     # Ép kiểu source sang category
     source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
             
-    # Lọc đặc trưng số và category
+    # Lọc đặc trưng số và category (khớp hoàn toàn với train_lightgbm.py)
     feature_cols = []
     for c in raw_feature_cols:
         # Không lấy các cột target t+ của các khí khác
