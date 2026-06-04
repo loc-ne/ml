@@ -149,7 +149,7 @@ print(f"✅ Đã tạo Dataset. Train size: {len(training_dataset):,}")
 # BƯỚC 4: KHỞI TẠO DATALOADERS & MODEL
 # =====================================================================
 # CẤU HÌNH CHO GPU T4 (15GB VRAM) trên Kaggle:
-batch_size = 1024 # Tăng từ 512 lên 1024 để giảm số step/epoch và tăng tốc GPU
+batch_size = 1024 # Tăng lên 1024 để giảm số step/epoch và tăng tốc độ xử lý của GPU
 train_dataloader = training_dataset.to_dataloader(
     train=True, batch_size=batch_size, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
@@ -178,15 +178,15 @@ tft_loss = MultiLoss(
     weights=loss_weights                       
 )
 
-# Nâng cấp dung lượng mô hình để tăng sức mạnh biểu diễn phi tuyến tính
+# Nâng cấp dung lượng mô hình ở mức tối ưu cho GPU T4 (hidden_size = 96)
 tft = TemporalFusionTransformer.from_dataset(
     training_dataset,
     learning_rate=0.001,
-    hidden_size=128,             # Nâng từ 64 lên 128
+    hidden_size=96,              # Nâng từ 64 lên 96 để tăng sức mạnh mà không quá nặng
     lstm_layers=2,               
-    attention_head_size=8,       # Nâng từ 4 lên 8 đầu attention
+    attention_head_size=4,       
     dropout=0.30,                # Tăng dropout lên 0.30 chống overfitting
-    hidden_continuous_size=64,   # Nâng từ 32 lên 64 cho đặc trưng liên tục
+    hidden_continuous_size=48,   # Nâng từ 32 lên 48 cho đặc trưng liên tục
     loss=tft_loss,
     log_interval=10,
     reduce_on_plateau_patience=4,
@@ -289,7 +289,6 @@ trainer = pl.Trainer(
     max_epochs=30,
     accelerator="gpu",      
     devices=1,               
-    precision="16-mixed",   # Kích hoạt Mixed Precision FP16 để tăng tốc gấp 2-3 lần trên GPU T4
     num_sanity_val_steps=2,
     gradient_clip_val=0.1,
     enable_progress_bar=False,  # Tắt progress bar để không bị spam tràn dòng log trên Kaggle
