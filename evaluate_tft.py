@@ -9,6 +9,10 @@ Kịch bản đánh giá độc lập mô hình Temporal Fusion Transformer (TFT
 """
 
 import os
+import warnings
+
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore")
 import sys
 import pickle
 import torch
