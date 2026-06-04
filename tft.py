@@ -149,7 +149,7 @@ print(f"✅ Đã tạo Dataset. Train size: {len(training_dataset):,}")
 # BƯỚC 4: KHỞI TẠO DATALOADERS & MODEL
 # =====================================================================
 # CẤU HÌNH CHO GPU T4 (15GB VRAM) trên Kaggle:
-batch_size = 1024 # Tăng lên 1024 để giảm số step/epoch và tăng tốc độ xử lý của GPU
+batch_size = 512 
 train_dataloader = training_dataset.to_dataloader(
     train=True, batch_size=batch_size, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
@@ -178,15 +178,15 @@ tft_loss = MultiLoss(
     weights=loss_weights                       
 )
 
-# Nâng cấp dung lượng mô hình ở mức tối ưu cho GPU T4 (hidden_size = 96)
+# Nâng cấp dung lượng mô hình để tăng sức mạnh biểu diễn phi tuyến tính
 tft = TemporalFusionTransformer.from_dataset(
     training_dataset,
     learning_rate=0.001,
-    hidden_size=96,              # Nâng từ 64 lên 96 để tăng sức mạnh mà không quá nặng
+    hidden_size=128,             # Nâng từ 64 lên 128
     lstm_layers=2,               
-    attention_head_size=4,       
+    attention_head_size=8,       # Nâng từ 4 lên 8 đầu attention
     dropout=0.30,                # Tăng dropout lên 0.30 chống overfitting
-    hidden_continuous_size=48,   # Nâng từ 32 lên 48 cho đặc trưng liên tục
+    hidden_continuous_size=64,   # Nâng từ 32 lên 64 cho đặc trưng liên tục
     loss=tft_loss,
     log_interval=10,
     reduce_on_plateau_patience=4,
@@ -249,26 +249,6 @@ class LossHistoryCallback(Callback):
 
 loss_history_callback = LossHistoryCallback()
 
-# 6. Callback in log gọn gàng theo từng Epoch (thay thế cho progress bar bị tràn dòng trên Kaggle)
-class PrintEpochSummaryCallback(Callback):
-    def on_train_epoch_start(self, trainer, pl_module):
-        print(f"\n🟢 Epoch {trainer.current_epoch} dang chay...")
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.sanity_checking:
-            return
-        epoch = trainer.current_epoch
-        metrics = trainer.callback_metrics
-        train_loss = metrics.get("train_loss_epoch") or metrics.get("train_loss")
-        val_loss = metrics.get("val_loss")
-        
-        train_loss_str = f"{train_loss.item():.4f}" if train_loss is not None else "N/A"
-        val_loss_str = f"{val_loss.item():.4f}" if val_loss is not None else "N/A"
-        
-        print(f"🏁 Epoch {epoch} hoan thanh | Train Loss: {train_loss_str} | Val Loss: {val_loss_str}")
-
-print_epoch_summary_callback = PrintEpochSummaryCallback()
-
 import pickle
 os.makedirs("models", exist_ok=True)
 dataset_params = training_dataset.get_parameters()
@@ -291,9 +271,9 @@ trainer = pl.Trainer(
     devices=1,               
     num_sanity_val_steps=2,
     gradient_clip_val=0.1,
-    enable_progress_bar=False,  # Tắt progress bar để không bị spam tràn dòng log trên Kaggle
+    enable_progress_bar=True,
     logger=tb_logger,
-    callbacks=[early_stop_callback, lr_logger, checkpoint_callback, loss_history_callback, print_epoch_summary_callback],
+    callbacks=[early_stop_callback, lr_logger, checkpoint_callback, loss_history_callback],
 )
 
 # Cấu hình huấn luyện từ đầu (Không sử dụng checkpoint cũ do thay đổi kiến trúc mô hình)
