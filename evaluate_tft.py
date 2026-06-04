@@ -114,8 +114,9 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
             print("❌ LỖI: Không tìm thấy bất kỳ file checkpoint .ckpt nào trong thư mục models/.")
             sys.exit(1)
             
-    print(f"📖 Đang tải mô hình từ checkpoint: {checkpoint_path}...")
-    model = TemporalFusionTransformer.load_from_checkpoint(checkpoint_path)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"📖 Đang tải mô hình từ checkpoint: {checkpoint_path} trên thiết bị {device.upper()}...")
+    model = TemporalFusionTransformer.load_from_checkpoint(checkpoint_path).to(device)
     model.eval()
     
     # 6. Tính toán sai số
