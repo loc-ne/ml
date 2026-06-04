@@ -53,11 +53,12 @@ print("✅ Đã hoàn tất ép kiểu dữ liệu và tạo time_idx.")
 max_encoder_length = 72  # Nhìn lại 3 ngày
 max_prediction_length = 24 # Dự báo 24h tới
 
-# Chuẩn Production mới: Phân chia Validation đa mùa (Multi-seasonal / Stratified split)
-# Bằng cách sử dụng toàn bộ năm 2025 và 2026 làm Validation (bắt đầu từ time_idx = 43848).
-# Mốc 43848 tương đương đúng 00:00:00 ngày 2025-01-01. Tập huấn luyện sẽ có trọn vẹn 5 năm (2020-2024),
-# đại diện cho mọi mùa khí hậu của Việt Nam, giúp kiểm thử khách quan và chống lệch mùa.
-training_cutoff = 43848 
+# Chuẩn Production: Phân chia Train - Val - Test đồng bộ với XGBoost/LightGBM
+t_min = df["timestamp"].min()
+training_cutoff = int((pd.to_datetime("2025-01-01 00:00:00") - t_min).total_seconds() // 3600)
+validation_cutoff = int((pd.to_datetime("2025-10-01 00:00:00") - t_min).total_seconds() // 3600)
+
+print(f"📊 Cutoff points - Train: <= {training_cutoff}, Val: <= {validation_cutoff}, Test: > {validation_cutoff}")
 
 # Lọc các biến thực tế có tồn tại trong df
 static_reals = [c for c in [
@@ -91,6 +92,15 @@ satellite_features = [
     "s5p_o3", "s5p_o3_cf", "s5p_aai", "s5p_aai_cf", "s5p_aod", "s5p_aod_cf", 
     "s5p_days_since_obs", "s5p_wind_alignment"
 ]
+
+# Xử lý trễ dữ liệu vệ tinh thực tế (Satellite Data Latency - Trễ 24h):
+# Dịch chuyển dữ liệu vệ tinh đi 24h về tương lai để mô hình huấn luyện dựa trên dữ liệu thực tế trễ.
+print("⏳ Đang xử lý độ trễ thực tế 24h của dữ liệu vệ tinh S5P...")
+for col in satellite_features:
+    if col in df.columns:
+        df[col] = df.groupby(["city", "station_id"])[col].shift(24)
+        df[col] = df.groupby(["city", "station_id"])[col].ffill().bfill()
+
 unknown_reals = [c for c in satellite_features + target_columns if c in df.columns]
 
 training_dataset = TimeSeriesDataSet(
@@ -120,7 +130,17 @@ training_dataset = TimeSeriesDataSet(
 )
 
 validation_dataset = TimeSeriesDataSet.from_dataset(
-    training_dataset, df, min_prediction_idx=training_cutoff + 1, stop_randomization=True
+    training_dataset, 
+    df[lambda x: x.time_idx <= validation_cutoff], 
+    min_prediction_idx=training_cutoff + 1, 
+    stop_randomization=True
+)
+
+test_dataset = TimeSeriesDataSet.from_dataset(
+    training_dataset, 
+    df, 
+    min_prediction_idx=validation_cutoff + 1, 
+    stop_randomization=True
 )
 
 print(f"✅ Đã tạo Dataset. Train size: {len(training_dataset):,}")
@@ -136,24 +156,37 @@ train_dataloader = training_dataset.to_dataloader(
 val_dataloader = validation_dataset.to_dataloader(
     train=False, batch_size=batch_size * 2, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
+test_dataloader = test_dataset.to_dataloader(
+    train=False, batch_size=batch_size * 2, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
+)
 
-# Tối ưu trọng số MultiLoss: Tăng trọng số CO từ 0.035 lên 0.25 để chống sụp đổ dự báo CO
-loss_weights = [1.0, 0.62, 1.45, 3.62, 0.25, 1.78]
+# Tự động hóa trọng số MultiLoss chuẩn Production (Inverse Variance Weighting):
+# Tính toán nghịch đảo độ lệch chuẩn (1 / std) của từng khí để cân bằng đóng góp loss của các khí có thang đo khác nhau.
+train_df_subset = df[df.time_idx <= training_cutoff]
+stds = []
+for target in target_columns:
+    std_val = train_df_subset[target].std()
+    stds.append(std_val if std_val > 0 else 1.0)
+
+raw_weights = [1.0 / s for s in stds]
+sum_w = sum(raw_weights)
+loss_weights = [w * len(target_columns) / sum_w for w in raw_weights]
+print(f"📊 Trọng số MultiLoss chuẩn Production (Inverse Variance): {loss_weights}")
 
 tft_loss = MultiLoss(
     metrics=[QuantileLoss() for _ in range(6)], 
     weights=loss_weights                       
 )
 
-# Thu nhỏ quy mô mạng & tăng Dropout để chống Overfitting mạnh mẽ
+# Nâng cấp dung lượng mô hình để tăng sức mạnh biểu diễn phi tuyến tính
 tft = TemporalFusionTransformer.from_dataset(
     training_dataset,
     learning_rate=0.001,
-    hidden_size=64,             
+    hidden_size=128,             # Nâng từ 64 lên 128
     lstm_layers=2,               
-    attention_head_size=4,      
-    dropout=0.25,               
-    hidden_continuous_size=32,  
+    attention_head_size=8,       # Nâng từ 4 lên 8 đầu attention
+    dropout=0.30,                # Tăng dropout lên 0.30 chống overfitting
+    hidden_continuous_size=64,   # Nâng từ 32 lên 64 cho đặc trưng liên tục
     loss=tft_loss,
     log_interval=10,
     reduce_on_plateau_patience=4,
@@ -243,7 +276,7 @@ trainer = pl.Trainer(
     callbacks=[early_stop_callback, lr_logger, checkpoint_callback, loss_history_callback],
 )
 
-# Cấu hình huấn luyện từ đầu với kiến trúc cải tiến mới
+# Cấu hình huấn luyện từ đầu (Không sử dụng checkpoint cũ do thay đổi kiến trúc mô hình)
 checkpoint_path = None
 
 trainer.fit(
@@ -253,4 +286,39 @@ trainer.fit(
     weights_only=False,
     ckpt_path=checkpoint_path 
 )
+
+# =====================================================================
+# BƯỚC 8: ĐÁNH GIÁ TRÊN TẬP TEST ĐỘC LẬP
+# =====================================================================
+print("\n📝 Đang tải mô hình tốt nhất để đánh giá trên tập Test...")
+best_model_path = checkpoint_callback.best_model_path
+print(f"🏆 Đường dẫn mô hình tốt nhất: {best_model_path}")
+
+if best_model_path and os.path.exists(best_model_path):
+    best_tft = TemporalFusionTransformer.load_from_checkpoint(best_model_path)
+    
+    # Thực hiện dự báo trên tập Test
+    print("🔮 Đang chạy dự báo trên tập Test...")
+    predictions = best_tft.predict(test_dataloader, return_y=True)
+    
+    # Tính toán MAE cho từng khí trên tập Test
+    for i, target in enumerate(target_columns):
+        disp_name = target.replace("_obs", "").replace("_pseudo", "").upper()
+        
+        # Lấy giá trị dự báo và thực tế tương ứng với target thứ i
+        if isinstance(predictions, tuple) and (isinstance(predictions[0], list) or isinstance(predictions[0], tuple)):
+            pred_vals = predictions[0][i]
+            actual_vals = predictions[1][i]
+        elif isinstance(predictions, tuple):
+            pred_vals = predictions[0]
+            actual_vals = predictions[1]
+        else:
+            pred_vals = predictions
+            actual_vals = None
+            
+        if actual_vals is not None:
+            mae = torch.mean(torch.abs(pred_vals.float() - actual_vals.float())).item()
+            print(f"📌 MAE trên tập Test cho {disp_name}: {mae:.4f}")
+else:
+    print("⚠️ Không tìm thấy đường dẫn mô hình tốt nhất để chạy đánh giá.")
 
