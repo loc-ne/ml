@@ -249,6 +249,26 @@ class LossHistoryCallback(Callback):
 
 loss_history_callback = LossHistoryCallback()
 
+# 6. Callback in log gọn gàng theo từng Epoch (thay thế cho progress bar bị tràn dòng trên Kaggle)
+class PrintEpochSummaryCallback(Callback):
+    def on_train_epoch_start(self, trainer, pl_module):
+        print(f"\n🟢 Epoch {trainer.current_epoch} dang chay...")
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking:
+            return
+        epoch = trainer.current_epoch
+        metrics = trainer.callback_metrics
+        train_loss = metrics.get("train_loss_epoch") or metrics.get("train_loss")
+        val_loss = metrics.get("val_loss")
+        
+        train_loss_str = f"{train_loss.item():.4f}" if train_loss is not None else "N/A"
+        val_loss_str = f"{val_loss.item():.4f}" if val_loss is not None else "N/A"
+        
+        print(f"🏁 Epoch {epoch} hoan thanh | Train Loss: {train_loss_str} | Val Loss: {val_loss_str}")
+
+print_epoch_summary_callback = PrintEpochSummaryCallback()
+
 import pickle
 os.makedirs("models", exist_ok=True)
 dataset_params = training_dataset.get_parameters()
@@ -272,9 +292,9 @@ trainer = pl.Trainer(
     precision="16-mixed",   # Kích hoạt Mixed Precision FP16 để tăng tốc gấp 2-3 lần trên GPU T4
     num_sanity_val_steps=2,
     gradient_clip_val=0.1,
-    enable_progress_bar=True,
+    enable_progress_bar=False,  # Tắt progress bar để không bị spam tràn dòng log trên Kaggle
     logger=tb_logger,
-    callbacks=[early_stop_callback, lr_logger, checkpoint_callback, loss_history_callback],
+    callbacks=[early_stop_callback, lr_logger, checkpoint_callback, loss_history_callback, print_epoch_summary_callback],
 )
 
 # Cấu hình huấn luyện từ đầu (Không sử dụng checkpoint cũ do thay đổi kiến trúc mô hình)
