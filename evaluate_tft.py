@@ -80,7 +80,7 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
     validation_cutoff = int((pd.to_datetime("2025-10-01 00:00:00") - t_min).total_seconds() // 3600)
     
     # 3. Tạo Test Dataset cho cả 2 thành phố
-    test_dataset = TimeSeriesDataSet.from_dataset(
+    test_dataset = TimeSeriesDataSet.from_parameters(
         dataset_params, 
         df, 
         min_prediction_idx=validation_cutoff + 1, 
@@ -90,7 +90,7 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
     
     # 4. Tạo Test Dataset chỉ cho Hà Nội (để đối chiếu sòng phẳng với Baseline)
     df_hn_only = df[df.city == "hanoi"].reset_index(drop=True)
-    test_dataset_hn = TimeSeriesDataSet.from_dataset(
+    test_dataset_hn = TimeSeriesDataSet.from_parameters(
         dataset_params,
         df_hn_only,
         min_prediction_idx=validation_cutoff + 1,
