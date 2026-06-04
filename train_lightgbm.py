@@ -101,6 +101,7 @@ def main():
     gc.collect()
     
     comparison_table = []
+    all_losses = {}
     
     # 3. Huấn luyện và đánh giá từng chất khí
     for target in TARGET_COLUMNS:
@@ -220,6 +221,13 @@ def main():
         avg_train_loss = np.mean(train_losses_all, axis=0)
         avg_val_loss = np.mean(val_losses_all, axis=0)
         
+        # Lưu kết quả để vẽ biểu đồ gộp ở cuối chương trình
+        all_losses[target] = {
+            "display_name": disp_name,
+            "train": avg_train_loss,
+            "val": avg_val_loss
+        }
+        
         plt.figure(figsize=(10, 5))
         plt.plot(range(1, len(avg_train_loss) + 1), avg_train_loss, label="Train MAE", color="#3b82f6", linewidth=2)
         plt.plot(range(1, len(avg_val_loss) + 1), avg_val_loss, label="Val MAE", color="#ef4444", linewidth=2)
@@ -305,6 +313,31 @@ def main():
     print("👉 Nhận xét: LightGBM mới được bổ sung 250 đặc trưng nâng cao và chia tập 80-10-10.")
     print("   Bộ siêu tham số tối ưu từ Optuna giúp cải thiện đáng kể so với mô hình gốc.")
     print("═" * 125)
+
+    # 4. Vẽ và lưu biểu đồ gộp 6 chất khí (2 hàng, 3 cột)
+    if all_losses:
+        print("\n📊 Đang vẽ và lưu biểu đồ gộp 6 chất khí (Combined Learning Curves)...")
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        axes = axes.flatten()
+        
+        for idx, target in enumerate(TARGET_COLUMNS):
+            if target in all_losses:
+                data = all_losses[target]
+                ax = axes[idx]
+                ax.plot(range(1, len(data["train"]) + 1), data["train"], label="Train MAE", color="#3b82f6", linewidth=2)
+                ax.plot(range(1, len(data["val"]) + 1), data["val"], label="Val MAE", color="#ef4444", linewidth=2)
+                ax.set_title(f"Learning Curve for {data['display_name']}", fontsize=12, fontweight="bold")
+                ax.set_xlabel("Boosting Rounds", fontsize=9)
+                ax.set_ylabel("MAE", fontsize=9)
+                ax.legend(fontsize=9)
+                ax.grid(True, linestyle="--", alpha=0.5)
+                
+        plt.tight_layout()
+        combined_plot_path = os.path.join("models/lightgbm", "learning_curves_combined.png")
+        plt.savefig(combined_plot_path, dpi=200, bbox_inches="tight")
+        plt.close()
+        print(f"✅ Đã vẽ và lưu biểu đồ gộp 6 chất khí thành công tại: {combined_plot_path}")
 
 if __name__ == "__main__":
     main()
