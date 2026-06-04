@@ -277,7 +277,7 @@ trainer = pl.Trainer(
 )
 
 # Cấu hình huấn luyện từ đầu (Không sử dụng checkpoint cũ do thay đổi kiến trúc mô hình)
-checkpoint_path = None
+checkpoint_path = "models/tft-best-model-epoch=01-val_loss=14.4022.ckpt"
 
 trainer.fit(
     tft,
