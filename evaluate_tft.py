@@ -21,6 +21,17 @@ import numpy as np
 from torch.utils.data import DataLoader
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 
+def to_device(batch, device):
+    if isinstance(batch, torch.Tensor):
+        return batch.to(device)
+    elif isinstance(batch, dict):
+        return {k: to_device(v, device) for k, v in batch.items()}
+    elif isinstance(batch, list):
+        return [to_device(v, device) for v in batch]
+    elif isinstance(batch, tuple):
+        return tuple(to_device(v, device) for v in batch)
+    return batch
+
 def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
     print("🚀 Bắt đầu tiến trình đánh giá mô hình TFT trên tập Test...")
     
@@ -146,8 +157,8 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
         from tqdm import tqdm
         for batch in tqdm(dataloader, desc="Đang dự báo"):
             x, y = batch
-            # Chuyển dữ liệu sang GPU
-            x_device = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in x.items()}
+            # Chuyển dữ liệu sang GPU (đệ quy để xử lý lists/dicts của tensors)
+            x_device = to_device(x, device)
             with torch.no_grad():
                 out = model(x_device)
                 pred = model.to_prediction(out) # Trả về list 6 tensors cho 6 targets
