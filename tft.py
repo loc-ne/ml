@@ -149,7 +149,7 @@ print(f"✅ Đã tạo Dataset. Train size: {len(training_dataset):,}")
 # BƯỚC 4: KHỞI TẠO DATALOADERS & MODEL
 # =====================================================================
 # CẤU HÌNH CHO GPU T4 (15GB VRAM) trên Kaggle:
-batch_size = 512 
+batch_size = 1024 # Tăng từ 512 lên 1024 để giảm số step/epoch và tăng tốc GPU
 train_dataloader = training_dataset.to_dataloader(
     train=True, batch_size=batch_size, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
@@ -269,6 +269,7 @@ trainer = pl.Trainer(
     max_epochs=30,
     accelerator="gpu",      
     devices=1,               
+    precision="16-mixed",   # Kích hoạt Mixed Precision FP16 để tăng tốc gấp 2-3 lần trên GPU T4
     num_sanity_val_steps=2,
     gradient_clip_val=0.1,
     enable_progress_bar=True,
