@@ -96,10 +96,12 @@ satellite_features = [
 # Xử lý trễ dữ liệu vệ tinh thực tế (Satellite Data Latency - Trễ 24h):
 # Dịch chuyển dữ liệu vệ tinh đi 24h về tương lai để mô hình huấn luyện dựa trên dữ liệu thực tế trễ.
 print("⏳ Đang xử lý độ trễ thực tế 24h của dữ liệu vệ tinh S5P...")
-for col in satellite_features:
-    if col in df.columns:
-        df[col] = df.groupby(["city", "station_id"])[col].shift(24)
-        df[col] = df.groupby(["city", "station_id"])[col].ffill().bfill()
+cols_to_shift = [col for col in satellite_features if col in df.columns]
+if cols_to_shift:
+    grouped = df.groupby(["city", "station_id"])
+    df[cols_to_shift] = grouped[cols_to_shift].shift(24)
+    df[cols_to_shift] = grouped[cols_to_shift].ffill()
+    df[cols_to_shift] = grouped[cols_to_shift].bfill()
 
 unknown_reals = [c for c in satellite_features + target_columns if c in df.columns]
 

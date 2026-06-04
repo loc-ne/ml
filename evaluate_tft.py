@@ -64,10 +64,13 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
         "s5p_o3", "s5p_o3_cf", "s5p_aai", "s5p_aai_cf", "s5p_aod", "s5p_aod_cf", 
         "s5p_days_since_obs", "s5p_wind_alignment"
     ]
-    for col in satellite_features:
-        if col in df.columns:
-            df[col] = df.groupby(["city", "station_id"])[col].shift(24)
-            df[col] = df.groupby(["city", "station_id"])[col].ffill().bfill()
+    print("⏳ Đang xử lý độ trễ thực tế 24h của dữ liệu vệ tinh S5P...")
+    cols_to_shift = [col for col in satellite_features if col in df.columns]
+    if cols_to_shift:
+        grouped = df.groupby(["city", "station_id"])
+        df[cols_to_shift] = grouped[cols_to_shift].shift(24)
+        df[cols_to_shift] = grouped[cols_to_shift].ffill()
+        df[cols_to_shift] = grouped[cols_to_shift].bfill()
 
     # 2. Khôi phục dataset parameters
     params_path = "models/training_dataset_params.pkl"
