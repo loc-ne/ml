@@ -123,9 +123,9 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
     target_columns = ["pm25_obs", "pm10_obs", "no2_pseudo", "so2_pseudo", "co_pseudo", "o3_pseudo"]
     
     def calculate_metrics(dataloader, description="TẬP TEST GỘP (HN + HCM)"):
-        print(f"\n📊 Đang tính toán sai số cho: {description}...")
+        print(f"📊 Đang tính toán sai số cho: {description}...")
         with torch.no_grad():
-            predictions = model.predict(dataloader, return_y=True, show_progress_bar=True)
+            predictions = model.predict(dataloader, return_y=True)
             
         print(f"{'Chất khí':<15} | {'MAE':<10} | {'RMSE':<10}")
         print("─" * 40)
