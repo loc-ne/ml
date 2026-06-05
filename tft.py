@@ -21,8 +21,8 @@ print("🚀 Khởi động môi trường TFT...")
 # Đổi đường dẫn dataset
 DATA_DIR = "./data" 
 
-df_hanoi = pd.read_parquet(f"/kaggle/input/datasets/arisene/train-final/dataset_hanoi.parquet")
-df_hcmc = pd.read_parquet(f"/kaggle/input/datasets/arisene/train-final/dataset_hcmc.parquet")
+df_hanoi = pd.read_parquet(f"/kaggle/input/datasets/nguynquclc/adhfahr/dataset_hanoi.parquet")
+df_hcmc = pd.read_parquet(f"/kaggle/input/datasets/nguynquclc/adhfahr/dataset_hcmc.parquet")
 
 
 df = pd.concat([df_hanoi, df_hcmc], ignore_index=True)
