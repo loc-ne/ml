@@ -149,15 +149,15 @@ print(f"✅ Đã tạo Dataset. Train size: {len(training_dataset):,}")
 # BƯỚC 4: KHỞI TẠO DATALOADERS & MODEL
 # =====================================================================
 # CẤU HÌNH CHO GPU T4 (15GB VRAM) trên Kaggle:
-batch_size = 1024 # Nâng lên 1024 để giảm steps/epoch và tăng tốc GPU
+batch_size = 512 
 train_dataloader = training_dataset.to_dataloader(
-    train=True, batch_size=batch_size, num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2
+    train=True, batch_size=batch_size, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
 val_dataloader = validation_dataset.to_dataloader(
-    train=False, batch_size=batch_size * 2, num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2
+    train=False, batch_size=batch_size * 2, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
 test_dataloader = test_dataset.to_dataloader(
-    train=False, batch_size=batch_size * 2, num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2
+    train=False, batch_size=batch_size * 2, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2
 )
 
 # Tự động hóa trọng số MultiLoss chuẩn Production (Inverse Variance Weighting):
