@@ -16,6 +16,7 @@ import os
 import sys
 import warnings
 import argparse
+import gc
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
