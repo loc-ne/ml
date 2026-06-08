@@ -373,21 +373,16 @@ y_test_orig_flat = scaler_y.inverse_transform(y_test_flat)
 y_pred_orig = y_pred_orig_flat.reshape(N_test, HORIZON, n_targets)
 y_test_orig = y_test_orig_flat.reshape(N_test, HORIZON, n_targets)
 
-# Lọc chỉ lấy các sequence của HÀ NỘI để đối chiếu sòng phẳng với TFT
-hanoi_test_mask = np.array(test_cities) == "hanoi"
-y_pred_hanoi = y_pred_orig[hanoi_test_mask]
-y_test_hanoi = y_test_orig[hanoi_test_mask]
-
-print(f"  → Số mẫu Test của Hà Nội sử dụng để đánh giá: {len(y_pred_hanoi):,}")
+print(f"  → Số mẫu Test sử dụng để đánh giá: {len(y_pred_orig):,}")
 
 # Tính toán sai số trung bình (Mean over all 24 horizons) cho từng khí
 lstm_results = {}
 for i, target in enumerate(TARGETS):
     disp_name = TARGET_DISPLAY_NAMES[target]
     
-    # Lấy nhãn thực tế & dự đoán của khí tương ứng trên tập Test Hà Nội
-    act_gas = y_test_hanoi[:, :, i]
-    pred_gas = y_pred_hanoi[:, :, i]
+    # Lấy nhãn thực tế & dự đoán của khí tương ứng trên toàn bộ tập Test
+    act_gas = y_test_orig[:, :, i]
+    pred_gas = y_pred_orig[:, :, i]
     
     mae = mean_absolute_error(act_gas, pred_gas)
     rmse = np.sqrt(mean_squared_error(act_gas, pred_gas))
@@ -395,51 +390,39 @@ for i, target in enumerate(TARGETS):
     
     lstm_results[disp_name] = {"mae": mae, "rmse": rmse, "r2": r2}
 
-# In bảng đối chiếu kết quả so với TFT
-print("\n" + "="*80)
-print(f"{'Chất khí':<10} | {'LSTM MAE':<12} {'TFT MAE':<12} | {'LSTM RMSE':<12} {'TFT RMSE':<12} | {'LSTM R²':<10}")
-print("-" * 80)
-TFT_BENCHMARK = {
-    "PM2.5": {"mae": 5.42, "rmse": 6.53},
-    "PM10":  {"mae": 4.79, "rmse": 5.98},
-    "NO₂":   {"mae": 5.83, "rmse": 6.86},
-    "SO₂":   {"mae": 4.17, "rmse": 5.12},
-    "CO":    {"mae": 66.46, "rmse": 85.10},
-    "O₃":    {"mae": 29.04, "rmse": 35.70},
-}
-
+# In bảng kết quả LSTM
+print("\n" + "="*55)
+print(f"📊 BẢNG TỔNG HỢP HIỆU NĂNG LSTM TRÊN TẬP TEST 10% (HN + HCM)")
+print("="*55)
+print(f"{'Chất khí':<10} | {'LSTM MAE':<12} {'LSTM RMSE':<12} {'LSTM R²':<10}")
+print("-" * 55)
 for gas in lstm_results.keys():
-    tft_mae = TFT_BENCHMARK[gas]["mae"]
-    tft_rmse = TFT_BENCHMARK[gas]["rmse"]
     lst_mae = lstm_results[gas]["mae"]
     lst_rmse = lstm_results[gas]["rmse"]
     lst_r2 = lstm_results[gas]["r2"]
-    print(f"{gas:<10} | {lst_mae:<12.2f} {tft_mae:<12.2f} | {lst_rmse:<12.2f} {tft_rmse:<12.2f} | {lst_r2:<10.3f}")
-print("="*80)
+    print(f"{gas:<10} | {lst_mae:<12.2f} {lst_rmse:<12.2f} {lst_r2:<10.3f}")
+print("="*55)
 
-# Vẽ biểu đồ so sánh MAE
+# Vẽ biểu đồ MAE của Stacked BiLSTM
 gas_names = list(lstm_results.keys())
 lstm_maes = [lstm_results[g]["mae"] for g in gas_names]
-tft_maes = [TFT_BENCHMARK[g]["mae"] for g in gas_names]
 
 x = np.arange(len(gas_names))
-width = 0.35
 
 fig, ax = plt.subplots(figsize=(10, 5))
-rects1 = ax.bar(x - width/2, lstm_maes, width, label='Stacked BiLSTM', color='royalblue')
-rects2 = ax.bar(x + width/2, tft_maes, width, label='TFT (Best)', color='orange')
+rects = ax.bar(x, lstm_maes, 0.5, label='Stacked BiLSTM', color='royalblue')
 
 ax.set_ylabel('MAE (μg/m³)')
-ax.set_title('So sánh sai số MAE giữa Stacked BiLSTM và TFT trên tập Test')
+ax.set_title('Sai số MAE của Stacked BiLSTM trên tập Test 10%')
 ax.set_xticks(x)
 ax.set_xticklabels(gas_names)
 ax.legend()
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("lstm_vs_tft_mae_comparison.png", dpi=150, bbox_inches='tight')
+plt.savefig("lstm_mae_on_test_set.png", dpi=150, bbox_inches='tight')
 plt.close()
-print("  → Đã lưu biểu đồ đối chiếu: lstm_vs_tft_mae_comparison.png")
+print("  → Đã lưu biểu đồ: lstm_mae_on_test_set.png")
 
 # ══════════════════════════════════════════════════════════════════
 # 11. LƯU MÔ HÌNH & KẾT THÚC

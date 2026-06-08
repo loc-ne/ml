@@ -118,15 +118,7 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
     )
     test_dataloader = test_dataset.to_dataloader(train=False, batch_size=1024, num_workers=2)
     
-    # 4. Tạo Test Dataset chỉ cho Hà Nội (để đối chiếu sòng phẳng với Baseline)
-    df_hn_only = df[df.city == "hanoi"].reset_index(drop=True)
-    test_dataset_hn = TimeSeriesDataSet.from_parameters(
-        dataset_params,
-        df_hn_only,
-        min_prediction_idx=validation_cutoff + 1,
-        stop_randomization=True
-    )
-    test_dataloader_hn = test_dataset_hn.to_dataloader(train=False, batch_size=1024, num_workers=2)
+
     
     # 5. Tải mô hình tốt nhất
     if not os.path.exists(checkpoint_path):
@@ -169,9 +161,10 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
                 all_preds[i].append(pred[i].cpu())
                 all_actuals[i].append(targets_actual[i].cpu())
                 
-        print(f"\n{'Chất khí':<15} | {'MAE':<10} | {'RMSE':<10}")
-        print("─" * 40)
+        print(f"\n{'Chất khí':<15} | {'MAE':<10} | {'RMSE':<10} | {'R²':<10}")
+        print("─" * 55)
         
+        from sklearn.metrics import r2_score
         for i, target in enumerate(target_columns):
             disp_name = target.replace("_obs", "").replace("_pseudo", "").upper()
             
@@ -181,11 +174,11 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
             
             mae = torch.mean(torch.abs(pred_vals - actual_vals)).item()
             rmse = torch.sqrt(torch.mean((pred_vals - actual_vals) ** 2)).item()
-            print(f"{disp_name:<15} | {mae:<10.4f} | {rmse:<10.4f}")
+            r2 = r2_score(actual_vals.numpy().flatten(), pred_vals.numpy().flatten())
+            print(f"{disp_name:<15} | {mae:<10.4f} | {rmse:<10.4f} | {r2:<10.4f}")
                 
     # Chạy tính toán
-    calculate_metrics(test_dataloader, "TẬP TEST GỘP (HN + HCM)")
-    calculate_metrics(test_dataloader_hn, "TẬP TEST RIÊNG HÀ NỘI (ĐỐI CHIẾU BASELINE)")
+    calculate_metrics(test_dataloader, "TẬP TEST 10% (HN + HCM)")
 
 if __name__ == "__main__":
     path_arg = sys.argv[1] if len(sys.argv) > 1 else "models/tft-best-model.ckpt"
