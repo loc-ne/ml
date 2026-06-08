@@ -173,12 +173,13 @@ def main():
         del df_target, df_clean, df_test, X_test_all, y_test_all
         gc.collect()
 
-    # 4. In bảng kết quả tổng hợp
-    print("\n" + "=" * 90)
-    print("📊 BẢNG TỔNG HỢP HIỆU NĂNG TRÊN TẬP TEST 10% (HN + HCM)")
-    print("=" * 90)
-    print(f"{'Chất khí':<10} | {'LGBM MAE':<10} {'LGBM RMSE':<10} {'LGBM R²':<10} | {'XGB MAE':<10} {'XGB RMSE':<10} {'XGB R²':<10}")
-    print("-" * 90)
+    # 4. In bảng kết quả tổng hợp và lưu ra file
+    output_lines = []
+    output_lines.append("=" * 90)
+    output_lines.append("📊 BẢNG TỔNG HỢP HIỆU NĂNG TRÊN TẬP TEST 10% (HN + HCM)")
+    output_lines.append("=" * 90)
+    output_lines.append(f"{'Chất khí':<10} | {'LGBM MAE':<10} {'LGBM RMSE':<10} {'LGBM R²':<10} | {'XGB MAE':<10} {'XGB RMSE':<10} {'XGB R²':<10}")
+    output_lines.append("-" * 90)
     for gas in TARGET_DISPLAY_NAMES.values():
         res_l = lgbm_results.get(gas, {})
         res_x = xgb_results.get(gas, {})
@@ -190,8 +191,15 @@ def main():
         x_mae = res_x.get("mae", np.nan)
         x_rmse = res_x.get("rmse", np.nan)
         x_r2 = res_x.get("r2", np.nan)
-        print(f"{gas:<10} | {l_mae:<10.2f} {l_rmse:<10.2f} {l_r2:<10.3f} | {x_mae:<10.2f} {x_rmse:<10.2f} {x_r2:<10.3f}")
-    print("=" * 90)
+        output_lines.append(f"{gas:<10} | {l_mae:<10.2f} {l_rmse:<10.2f} {l_r2:<10.3f} | {x_mae:<10.2f} {x_rmse:<10.2f} {x_r2:<10.3f}")
+    output_lines.append("=" * 90)
+    
+    output_text = "\n".join(output_lines)
+    print("\n" + output_text)
+    
+    with open("trees_test_results.txt", "w", encoding="utf-8") as f:
+        f.write(output_text)
+    print("  → Đã lưu kết quả đánh giá vào file: trees_test_results.txt")
 
 if __name__ == "__main__":
     main()

@@ -161,8 +161,9 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
                 all_preds[i].append(pred[i].cpu())
                 all_actuals[i].append(targets_actual[i].cpu())
                 
-        print(f"\n{'Chất khí':<15} | {'MAE':<10} | {'RMSE':<10} | {'R²':<10}")
-        print("─" * 55)
+        output_lines = []
+        output_lines.append(f"{'Chất khí':<15} | {'MAE':<10} | {'RMSE':<10} | {'R²':<10}")
+        output_lines.append("─" * 55)
         
         from sklearn.metrics import r2_score
         for i, target in enumerate(target_columns):
@@ -175,7 +176,15 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
             mae = torch.mean(torch.abs(pred_vals - actual_vals)).item()
             rmse = torch.sqrt(torch.mean((pred_vals - actual_vals) ** 2)).item()
             r2 = r2_score(actual_vals.numpy().flatten(), pred_vals.numpy().flatten())
-            print(f"{disp_name:<15} | {mae:<10.4f} | {rmse:<10.4f} | {r2:<10.4f}")
+            output_lines.append(f"{disp_name:<15} | {mae:<10.4f} | {rmse:<10.4f} | {r2:<10.4f}")
+            
+        output_text = "\n".join(output_lines)
+        print("\n" + description)
+        print(output_text)
+        
+        with open("tft_test_results.txt", "w", encoding="utf-8") as f:
+            f.write(description + "\n" + output_text)
+        print("  → Đã lưu kết quả đánh giá vào file: tft_test_results.txt")
                 
     # Chạy tính toán
     calculate_metrics(test_dataloader, "TẬP TEST 10% (HN + HCM)")

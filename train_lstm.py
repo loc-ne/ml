@@ -398,18 +398,26 @@ for i, target in enumerate(TARGETS):
     
     lstm_results[disp_name] = {"mae": mae, "rmse": rmse, "r2": r2}
 
-# In bảng kết quả LSTM
-print("\n" + "="*55)
-print(f"📊 BẢNG TỔNG HỢP HIỆU NĂNG LSTM TRÊN TẬP TEST 10% (HN + HCM)")
-print("="*55)
-print(f"{'Chất khí':<10} | {'LSTM MAE':<12} {'LSTM RMSE':<12} {'LSTM R²':<10}")
-print("-" * 55)
+# Ghi kết quả đánh giá ra file và in ra console
+output_lines = []
+output_lines.append("="*55)
+output_lines.append("📊 BẢNG TỔNG HỢP HIỆU NĂNG LSTM TRÊN TẬP TEST 10% (HN + HCM)")
+output_lines.append("="*55)
+output_lines.append(f"{'Chất khí':<10} | {'LSTM MAE':<12} {'LSTM RMSE':<12} {'LSTM R²':<10}")
+output_lines.append("-" * 55)
 for gas in lstm_results.keys():
     lst_mae = lstm_results[gas]["mae"]
     lst_rmse = lstm_results[gas]["rmse"]
     lst_r2 = lstm_results[gas]["r2"]
-    print(f"{gas:<10} | {lst_mae:<12.2f} {lst_rmse:<12.2f} {lst_r2:<10.3f}")
-print("="*55)
+    output_lines.append(f"{gas:<10} | {lst_mae:<12.2f} {lst_rmse:<12.2f} {lst_r2:<10.3f}")
+output_lines.append("="*55)
+
+output_text = "\n".join(output_lines)
+print("\n" + output_text)
+
+with open("lstm_test_results.txt", "w", encoding="utf-8") as f:
+    f.write(output_text)
+print("  → Đã lưu kết quả đánh giá vào file: lstm_test_results.txt")
 
 # Vẽ biểu đồ MAE của Stacked BiLSTM
 gas_names = list(lstm_results.keys())
