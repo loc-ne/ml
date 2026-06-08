@@ -112,7 +112,7 @@ DROP_COLS = [
     "timestamp", "station_id", "station_name", "data_source",
     "city", "pm25_source", "pm10_source",
     "no2_source", "so2_source", "co_source", "o3_source",
-] + TARGETS
+]
 
 FEATURE_COLS = [c for c in df.columns if c not in DROP_COLS]
 print(f"  Số features sử dụng: {len(FEATURE_COLS)}")
