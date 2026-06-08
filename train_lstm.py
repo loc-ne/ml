@@ -15,6 +15,7 @@ trên chuỗi dự báo 24 giờ tiếp theo (t+1 đến t+24).
 import os
 import sys
 import warnings
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -47,7 +48,7 @@ LSTM_UNITS_1  = 128     # Hidden units tầng LSTM thứ nhất
 LSTM_UNITS_2  = 64      # Hidden units tầng LSTM thứ hai
 DROPOUT_RATE  = 0.2
 BATCH_SIZE    = 512
-EPOCHS        = 50
+EPOCHS        = 10
 LEARNING_RATE = 1e-3
 SEED          = 42
 
@@ -259,6 +260,11 @@ print("\n" + "="*65)
 print("  BƯỚC 6 — Xây dựng mô hình Stacked BiLSTM")
 print("="*65)
 
+# Phân tích tham số dòng lệnh
+parser = argparse.ArgumentParser()
+parser.add_argument("--eval-only", action="store_true", help="Chỉ đánh giá mô hình đã lưu mà không huấn luyện lại")
+args, unknown = parser.parse_known_args()
+
 # Thiết lập chiến lược phân tán đa GPU nếu phát hiện nhiều GPU (ví dụ song song 2x T4 trên Kaggle)
 gpus = tf.config.list_physical_devices('GPU')
 if len(gpus) > 1:
@@ -268,66 +274,80 @@ else:
     print("🚀 Sử dụng Single-GPU hoặc CPU mặc định.")
     strategy = tf.distribute.get_strategy()
 
-with strategy.scope():
-    inputs = Input(shape=(WINDOW_SIZE, n_features), name="input")
-
-    # Tầng BiLSTM 1 - Trả về sequence để xếp tầng tiếp theo
-    x = Bidirectional(
-        LSTM(LSTM_UNITS_1, return_sequences=True, dropout=DROPOUT_RATE),
-        name="bi_lstm_1"
-    )(inputs)
-    x = LayerNormalization(name="layer_norm_1")(x)
-
-    # Tầng BiLSTM 2 - Trả về vector tổng hợp cuối cùng
-    x = Bidirectional(
-        LSTM(LSTM_UNITS_2, return_sequences=False, dropout=DROPOUT_RATE),
-        name="bi_lstm_2"
-    )(x)
-    x = LayerNormalization(name="layer_norm_2")(x)
-
-    # Mạng nơ-ron Dense kết nối
-    x = Dense(128, activation="relu", name="dense_1")(x)
-    x = Dropout(DROPOUT_RATE, name="dropout_out")(x)
-    x = Dense(64, activation="relu", name="dense_2")(x)
-
-    # Nút ra tuyến tính tương đương 24h x 6 targets
-    x = Dense(HORIZON * n_targets, activation="linear", name="dense_output")(x)
-
-    # Reshape kết quả đầu ra về dạng (Horizon=24, Targets=6) giống cấu trúc mong đợi
-    outputs = Reshape((HORIZON, n_targets), name="output")(x)
-
-    model = Model(inputs, outputs, name="StackedBiLSTM_24h_Forecast")
+if args.eval_only:
+    model_path = "best_lstm_24h_model.keras"
+    if not os.path.exists(model_path):
+        model_path = "lstm_airquality_24h_model.keras"
+    if not os.path.exists(model_path):
+        print(f"❌ LỖI: Không tìm thấy file model để load ({model_path}).")
+        sys.exit(1)
     
-    model.compile(
-        optimizer=Adam(learning_rate=LEARNING_RATE),
-        loss="mse",
-        metrics=["mae"]
+    print(f"🚀 Chế độ chỉ đánh giá (Eval-only): Đang tải mô hình từ {model_path}...")
+    with strategy.scope():
+        model = tf.keras.models.load_model(model_path)
+    
+    model.summary()
+else:
+    with strategy.scope():
+        inputs = Input(shape=(WINDOW_SIZE, n_features), name="input")
+
+        # Tầng BiLSTM 1 - Trả về sequence để xếp tầng tiếp theo
+        x = Bidirectional(
+            LSTM(LSTM_UNITS_1, return_sequences=True, dropout=DROPOUT_RATE),
+            name="bi_lstm_1"
+        )(inputs)
+        x = LayerNormalization(name="layer_norm_1")(x)
+
+        # Tầng BiLSTM 2 - Trả về vector tổng hợp cuối cùng
+        x = Bidirectional(
+            LSTM(LSTM_UNITS_2, return_sequences=False, dropout=DROPOUT_RATE),
+            name="bi_lstm_2"
+        )(x)
+        x = LayerNormalization(name="layer_norm_2")(x)
+
+        # Mạng nơ-ron Dense kết nối
+        x = Dense(128, activation="relu", name="dense_1")(x)
+        x = Dropout(DROPOUT_RATE, name="dropout_out")(x)
+        x = Dense(64, activation="relu", name="dense_2")(x)
+
+        # Nút ra tuyến tính tương đương 24h x 6 targets
+        x = Dense(HORIZON * n_targets, activation="linear", name="dense_output")(x)
+
+        # Reshape kết quả đầu ra về dạng (Horizon=24, Targets=6) giống cấu trúc mong đợi
+        outputs = Reshape((HORIZON, n_targets), name="output")(x)
+
+        model = Model(inputs, outputs, name="StackedBiLSTM_24h_Forecast")
+        
+        model.compile(
+            optimizer=Adam(learning_rate=LEARNING_RATE),
+            loss="mse",
+            metrics=["mae"]
+        )
+
+    model.summary()
+
+    callbacks = [
+        EarlyStopping(
+            monitor="val_loss", patience=5,
+            restore_best_weights=True, verbose=1
+        ),
+        ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5,
+            patience=3, min_lr=1e-6, verbose=1
+        ),
+        ModelCheckpoint(
+            "best_lstm_24h_model.keras",
+            monitor="val_loss", save_best_only=True, verbose=0
+        ),
+    ]
+
+    history = model.fit(
+        ds_train,
+        validation_data=ds_val,
+        epochs=EPOCHS,
+        callbacks=callbacks,
+        verbose=1
     )
-
-model.summary()
-
-callbacks = [
-    EarlyStopping(
-        monitor="val_loss", patience=5,
-        restore_best_weights=True, verbose=1
-    ),
-    ReduceLROnPlateau(
-        monitor="val_loss", factor=0.5,
-        patience=3, min_lr=1e-6, verbose=1
-    ),
-    ModelCheckpoint(
-        "best_lstm_24h_model.keras",
-        monitor="val_loss", save_best_only=True, verbose=0
-    ),
-]
-
-history = model.fit(
-    ds_train,
-    validation_data=ds_val,
-    epochs=EPOCHS,
-    callbacks=callbacks,
-    verbose=1
-)
 
 # ══════════════════════════════════════════════════════════════════
 # 10. ĐÁNH GIÁ CHUẨN XÁC TRÊN TẬP TEST (Inverse Scaled)
