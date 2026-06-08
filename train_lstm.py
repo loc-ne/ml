@@ -145,22 +145,23 @@ print("\n" + "="*65)
 print("  BƯỚC 4 — Chuẩn hóa dữ liệu (Chỉ Fit trên tập Train)")
 print("="*65)
 
-scaler_X = StandardScaler()
 scaler_y = StandardScaler()
-
-# Fit scaler trên tập Train
-scaler_X.fit(df_train[FEATURE_COLS])
 scaler_y.fit(df_train[TARGETS])
 
-# Transform lên cả 3 tập
-df_train[FEATURE_COLS] = scaler_X.transform(df_train[FEATURE_COLS])
-df_train[TARGETS]      = scaler_y.transform(df_train[TARGETS])
+# Tách biệt đặc trưng không phải target để tránh chuẩn hóa chồng lấn (Double Scaling)
+NON_TARGET_FEATURES = [c for c in FEATURE_COLS if c not in TARGETS]
+scaler_X = StandardScaler()
+scaler_X.fit(df_train[NON_TARGET_FEATURES])
 
-df_val[FEATURE_COLS] = scaler_X.transform(df_val[FEATURE_COLS])
-df_val[TARGETS]      = scaler_y.transform(df_val[TARGETS])
+# Transform lên cả 3 tập (mỗi cột chỉ chuẩn hóa đúng 1 lần)
+df_train[NON_TARGET_FEATURES] = scaler_X.transform(df_train[NON_TARGET_FEATURES])
+df_train[TARGETS]             = scaler_y.transform(df_train[TARGETS])
 
-df_test[FEATURE_COLS] = scaler_X.transform(df_test[FEATURE_COLS])
-df_test[TARGETS]      = scaler_y.transform(df_test[TARGETS])
+df_val[NON_TARGET_FEATURES] = scaler_X.transform(df_val[NON_TARGET_FEATURES])
+df_val[TARGETS]             = scaler_y.transform(df_val[TARGETS])
+
+df_test[NON_TARGET_FEATURES] = scaler_X.transform(df_test[NON_TARGET_FEATURES])
+df_test[TARGETS]             = scaler_y.transform(df_test[TARGETS])
 
 print("  ✅ Đã hoàn thành chuẩn hóa sòng phẳng.")
 
