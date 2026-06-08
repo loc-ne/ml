@@ -39,6 +39,10 @@ def load_and_combine_datasets():
         hcm_path = "../dataset_hcmc.parquet"
         
     if not os.path.exists(hn_path) or not os.path.exists(hcm_path):
+        hn_path = "dataset_hanoi.parquet"
+        hcm_path = "dataset_hcmc.parquet"
+        
+    if not os.path.exists(hn_path) or not os.path.exists(hcm_path):
         raise FileNotFoundError("❌ Thiếu file dataset_hanoi.parquet hoặc dataset_hcmc.parquet.")
         
     print(f"📖 Đang đọc dữ liệu Hà Nội...")
@@ -52,6 +56,11 @@ def load_and_combine_datasets():
     df_combined = pd.concat([df_hn, df_hcm], ignore_index=True)
     df_combined["timestamp"] = pd.to_datetime(df_combined["timestamp"])
     df_combined = df_combined.sort_values("timestamp").reset_index(drop=True)
+    
+    # LỌC DỮ LIỆU TẬP TEST: Chỉ cần giữ lại từ 2025-09-23 00:00:00 trở đi (2025-10-01 trừ đi 8 ngày lag)
+    # Giúp giảm dữ liệu từ 2.5 triệu dòng xuống ~200k dòng, giải phóng 90% RAM và chống lỗi OOM.
+    test_start_date = pd.to_datetime("2025-09-23 00:00:00")
+    df_combined = df_combined[df_combined["timestamp"] >= test_start_date].reset_index(drop=True)
     return df_combined
 
 def main():
@@ -65,6 +74,11 @@ def main():
     fe = FeatureEngineer()
     df_feat = fe.transform(df_raw)
     del df_raw
+    gc.collect()
+    
+    # Ép kiểu float64 sang float32 để tiết kiệm RAM tối đa
+    float64_cols = df_feat.select_dtypes(include=["float64"]).columns
+    df_feat[float64_cols] = df_feat[float64_cols].astype("float32")
     gc.collect()
     
     lgbm_results = {}
