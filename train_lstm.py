@@ -125,58 +125,49 @@ df[TARGETS]      = df[TARGETS].fillna(0)
 # 4. CHIA TÁCH THEO THỜI GIAN (Giống hệt LightGBM/XGBoost)
 # ══════════════════════════════════════════════════════════════════
 print("\n" + "="*65)
-print("  BƯỚC 3 — Phân chia Train - Val - Test theo mốc thời gian")
-print("="*65)
-
-# Cắt dữ liệu thô theo mốc thời gian trước
-df_train = df[df["timestamp"] < pd.to_datetime("2025-01-01 00:00:00")].copy()
-df_val = df[(df["timestamp"] >= pd.to_datetime("2025-01-01 00:00:00")) & 
-            (df["timestamp"] < pd.to_datetime("2025-10-01 00:00:00"))].copy()
-df_test = df[df["timestamp"] >= pd.to_datetime("2025-10-01 00:00:00")].copy()
-
-# Giải phóng df gốc để tiết kiệm bộ nhớ
-del df
-import gc; gc.collect()
-
 # ══════════════════════════════════════════════════════════════════
-# 5. CHUẨN HÓA DỮ LIỆU ĐÚNG PHƯƠNG PHÁP KHOA HỌC (Không Data Leakage)
+# 4. CHUẨN HÓA DỮ LIỆU ĐÚNG PHƯƠNG PHÁP KHOA HỌC (Không Data Leakage)
 # ══════════════════════════════════════════════════════════════════
 print("\n" + "="*65)
 print("  BƯỚC 4 — Chuẩn hóa dữ liệu (Chỉ Fit trên tập Train)")
 print("="*65)
 
+# Bản sao tập Train chưa scale để fit bộ scaler
+df_train_raw = df[df["timestamp"] < pd.to_datetime("2025-01-01 00:00:00")].copy()
+
 scaler_y = StandardScaler()
-scaler_y.fit(df_train[TARGETS])
+scaler_y.fit(df_train_raw[TARGETS])
 
 # Tách biệt đặc trưng không phải target để tránh chuẩn hóa chồng lấn (Double Scaling)
 NON_TARGET_FEATURES = [c for c in FEATURE_COLS if c not in TARGETS]
 scaler_X = StandardScaler()
-scaler_X.fit(df_train[NON_TARGET_FEATURES])
+scaler_X.fit(df_train_raw[NON_TARGET_FEATURES])
 
-# Transform lên cả 3 tập (mỗi cột chỉ chuẩn hóa đúng 1 lần)
-df_train[NON_TARGET_FEATURES] = scaler_X.transform(df_train[NON_TARGET_FEATURES])
-df_train[TARGETS]             = scaler_y.transform(df_train[TARGETS])
+# Giải phóng bộ nhớ bản sao tập Train thô
+del df_train_raw
+gc.collect()
 
-df_val[NON_TARGET_FEATURES] = scaler_X.transform(df_val[NON_TARGET_FEATURES])
-df_val[TARGETS]             = scaler_y.transform(df_val[TARGETS])
-
-df_test[NON_TARGET_FEATURES] = scaler_X.transform(df_test[NON_TARGET_FEATURES])
-df_test[TARGETS]             = scaler_y.transform(df_test[TARGETS])
+# Transform lên toàn bộ dataframe (mỗi cột chỉ chuẩn hóa đúng 1 lần)
+df[NON_TARGET_FEATURES] = scaler_X.transform(df[NON_TARGET_FEATURES])
+df[TARGETS]             = scaler_y.transform(df[TARGETS])
 
 print("  ✅ Đã hoàn thành chuẩn hóa sòng phẳng.")
 
 # ══════════════════════════════════════════════════════════════════
-# 6. TẠO SLIDING WINDOW CÓ HORIZON = 24 CHO TỪNG TRẠM
+# 5. TẠO SLIDING WINDOW CÓ HORIZON = 24 CHO TỪNG TRẠM
 # ══════════════════════════════════════════════════════════════════
 print("\n" + "="*65)
 print("  BƯỚC 5 — Tạo sliding window (Horizon = 24h)")
 print("="*65)
 
-def build_sequences(df_subset):
+def build_sequences(df_subset, split_name="train"):
     station_data = []
     indices = []
     city_names = []
     s_idx = 0
+    
+    t_train_cutoff = pd.to_datetime("2025-01-01 00:00:00")
+    t_test_cutoff = pd.to_datetime("2025-10-01 00:00:00")
     
     for (city, station_id), grp in df_subset.groupby(["city", "station_id"], sort=False):
         n_samples = len(grp)
@@ -184,26 +175,42 @@ def build_sequences(df_subset):
         if n_samples > WINDOW_SIZE + HORIZON:
             X_vals = grp[FEATURE_COLS].values.astype(np.float32)
             y_vals = grp[TARGETS].values.astype(np.float32)
+            timestamps = grp["timestamp"].values
             
             n_seq = n_samples - WINDOW_SIZE - HORIZON + 1
-            station_data.append((X_vals, y_vals))
-            
+            station_added = False
             for i in range(n_seq):
-                indices.append((s_idx, i))
-                city_names.append(city)
-            s_idx += 1
+                # Kiểm tra mốc t+1 (bước dự báo đầu tiên) để phân chia tập dữ liệu
+                t_plus_1 = pd.to_datetime(timestamps[i + WINDOW_SIZE])
+                
+                if split_name == "train" and t_plus_1 < t_train_cutoff:
+                    indices.append((s_idx, i))
+                    city_names.append(city)
+                    station_added = True
+                elif split_name == "val" and t_train_cutoff <= t_plus_1 < t_test_cutoff:
+                    indices.append((s_idx, i))
+                    city_names.append(city)
+                    station_added = True
+                elif split_name == "test" and t_plus_1 >= t_test_cutoff:
+                    indices.append((s_idx, i))
+                    city_names.append(city)
+                    station_added = True
             
+            if station_added:
+                station_data.append((X_vals, y_vals))
+                s_idx += 1
+                
     return station_data, indices, city_names
 
 print("⏳ Đang chuẩn bị sequence cho tập Train...")
-train_station_data, train_indices, _ = build_sequences(df_train)
+train_station_data, train_indices, _ = build_sequences(df, "train")
 print("⏳ Đang chuẩn bị sequence cho tập Val...")
-val_station_data, val_indices, _ = build_sequences(df_val)
+val_station_data, val_indices, _ = build_sequences(df, "val")
 print("⏳ Đang chuẩn bị sequence cho tập Test...")
-test_station_data, test_indices, test_cities = build_sequences(df_test)
+test_station_data, test_indices, test_cities = build_sequences(df, "test")
 
-# Giải phóng dataframes phụ để giải phóng tối đa RAM trước khi huấn luyện
-del df_train, df_val, df_test
+# Giải phóng df gốc để tiết kiệm bộ nhớ tối đa trước khi huấn luyện
+del df
 gc.collect()
 
 print(f"  Train sequences: {len(train_indices):,}")
