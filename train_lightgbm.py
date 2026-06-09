@@ -104,6 +104,13 @@ def main():
     del df_raw
     gc.collect()
     
+    # Ép kiểu danh mục (category) cho các cột phân loại trong df_feat
+    source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
+    for col in source_cols + ["station_id_encoded", "city"]:
+        if col in df_feat.columns:
+            df_feat[col] = df_feat[col].astype("category")
+    gc.collect()
+    
     comparison_table = []
     all_losses = {}
     
@@ -114,9 +121,6 @@ def main():
         
         # Lấy danh sách các cột đặc trưng từ FeatureEngineer
         raw_feature_cols = fe.get_feature_columns(df_feat)
-        
-        # Ép kiểu dữ liệu nguồn (source) sang category để LightGBM tự nhận diện
-        source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
                 
         # Lọc đặc trưng: chỉ giữ lại các cột số và cột phân loại (category)
         feature_cols = []
@@ -127,56 +131,41 @@ def main():
             if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
                 feature_cols.append(c)
                 
-        # Bổ sung city vào features và cast thành category
+        # Bổ sung city vào features
         if "city" in df_feat.columns:
             feature_cols.append("city")
-                
-        # Chỉ copy các cột thực sự cần dùng để giảm tải RAM tối đa
-        cols_to_keep = list(set(feature_cols + ["city", "station_id", "timestamp", target] + source_cols))
-        cols_to_keep = [c for c in cols_to_keep if c in df_feat.columns]
-        
-        df_target = df_feat[cols_to_keep].copy()
-        
-        # Ép kiểu danh mục (category) cho các cột phân loại để mô hình tối ưu nhánh chia
-        for col in source_cols + ["station_id_encoded", "city"]:
-            if col in df_target.columns:
-                df_target[col] = df_target[col].astype("category")
-                
-        # Tạo dữ liệu trượt dự báo 24h tương lai (y) bằng shift(-h)
+            
+        # Tạo dữ liệu trượt dự báo 24h tương lai (y) bằng shift(-h) trên dataframe nhỏ để tiết kiệm RAM
+        df_y = df_feat[["city", "station_id", target, "timestamp"]].copy()
         y_cols = []
         for h in range(1, 25):
             col_name = f"{target}_t+{h}"
-            df_target[col_name] = df_target.groupby(["city", "station_id"])[target].shift(-h)
+            df_y[col_name] = df_y.groupby(["city", "station_id"])[target].shift(-h)
             y_cols.append(col_name)
             
-        # Loại bỏ các dòng bị khuyết nhãn target tương lai hoặc đặc trưng
-        df_clean = df_target.dropna(subset=feature_cols + y_cols).reset_index(drop=True)
+        # Loại bỏ các dòng bị khuyết nhãn target tương lai
+        df_y = df_y.dropna(subset=y_cols)
+        valid_idx = df_y.index
         
-        # Chia tách Train - Val - Test theo thời gian (80 - 10 - 10)
-        df_train = df_clean[df_clean["timestamp"] < pd.to_datetime("2025-01-01 00:00:00")]
-        df_val = df_clean[(df_clean["timestamp"] >= pd.to_datetime("2025-01-01 00:00:00")) & 
-                          (df_clean["timestamp"] < pd.to_datetime("2025-10-01 00:00:00"))]
-        df_test = df_clean[df_clean["timestamp"] >= pd.to_datetime("2025-10-01 00:00:00")]
+        # Chia tách Train - Val - Test theo thời gian (80 - 10 - 10) dựa trên chỉ mục
+        train_mask = df_y["timestamp"] < pd.to_datetime("2025-01-01 00:00:00")
+        val_mask = (df_y["timestamp"] >= pd.to_datetime("2025-01-01 00:00:00")) & (df_y["timestamp"] < pd.to_datetime("2025-10-01 00:00:00"))
+        test_mask = df_y["timestamp"] >= pd.to_datetime("2025-10-01 00:00:00")
         
         # Lọc tập Val Hà Nội (để theo dõi/đối chiếu) và tập Test Gộp (HN + HCM)
-        df_val_hanoi = df_val[df_val["city"] == "hanoi"]
+        val_hn_mask = val_mask & (df_y["city"] == "hanoi")
         
-        X_train = df_train[feature_cols].copy()
-        y_train = df_train[y_cols].copy()
+        X_train = df_feat.loc[valid_idx[train_mask], feature_cols].copy()
+        y_train = df_y.loc[valid_idx[train_mask], y_cols].copy()
         
-        X_val_hn = df_val_hanoi[feature_cols].copy()
-        y_val_hn = df_val_hanoi[y_cols].copy()
+        X_val_hn = df_feat.loc[valid_idx[val_hn_mask], feature_cols].copy()
+        y_val_hn = df_y.loc[valid_idx[val_hn_mask], y_cols].copy()
         
-        X_test_all = df_test[feature_cols].copy()
-        y_test_all = df_test[y_cols].copy()
+        X_test_all = df_feat.loc[valid_idx[test_mask], feature_cols].copy()
+        y_test_all = df_y.loc[valid_idx[test_mask], y_cols].copy()
         
-        # Giải phóng các dataframe trung gian lớn
-        del df_target
-        del df_clean
-        del df_train
-        del df_val
-        del df_test
-        del df_val_hanoi
+        # Giải phóng dataframe phụ df_y ngay lập tức
+        del df_y
         gc.collect()
         
         # Cấu hình LightGBM: sử dụng bộ tối ưu từ Optuna nếu có, ngược lại dùng mặc định
