@@ -73,9 +73,6 @@ def tune_gas(df_feat, target_gas, n_trials=30):
     fe = FeatureEngineer()
     raw_feature_cols = fe.get_feature_columns(df_feat)
     
-    # Ép kiểu source sang category
-    source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
-            
     # Lọc đặc trưng số và category (khớp hoàn toàn với train_lightgbm.py)
     feature_cols = []
     for c in raw_feature_cols:
@@ -86,45 +83,36 @@ def tune_gas(df_feat, target_gas, n_trials=30):
         if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
             feature_cols.append(c)
             
-    # Chỉ copy các cột thực sự cần dùng để giảm tải RAM tối đa
-    cols_to_keep = list(set(feature_cols + ["city", "station_id", "timestamp", target_gas] + source_cols))
-    cols_to_keep = [c for c in cols_to_keep if c in df_feat.columns]
-    
-    df_target = df_feat[cols_to_keep].copy()
-    
-    for col in source_cols:
-        if col in df_target.columns:
-            df_target[col] = df_target[col].astype("category")
+    # Bổ sung city vào features
+    if "city" in df_feat.columns:
+        feature_cols.append("city")
             
-    # 2. Tạo targets cho các bước đại diện
+    # 2. Tạo targets cho các bước đại diện bằng dataframe nhỏ
+    df_y = df_feat[["city", "station_id", target_gas, "timestamp"]].copy()
     y_cols = []
     for h in REPRESENTATIVE_HORIZONS:
         col_name = f"{target_gas}_t+{h}"
-        df_target[col_name] = df_target.groupby(["city", "station_id"])[target_gas].shift(-h)
+        df_y[col_name] = df_y.groupby(["city", "station_id"])[target_gas].shift(-h)
         y_cols.append(col_name)
         
-    # Drop rows with NaN targets/features
-    df_clean = df_target.dropna(subset=feature_cols + y_cols).reset_index(drop=True)
+    # Loại bỏ các dòng bị khuyết nhãn target tương lai
+    df_y = df_y.dropna(subset=y_cols)
+    valid_idx = df_y.index
     
-    # Chia dữ liệu theo mốc thời gian 80 - 10 - 10
-    df_train = df_clean[df_clean["timestamp"] < pd.to_datetime("2025-01-01 00:00:00")]
-    df_val = df_clean[(df_clean["timestamp"] >= pd.to_datetime("2025-01-01 00:00:00")) & 
-                      (df_clean["timestamp"] < pd.to_datetime("2025-10-01 00:00:00"))]
+    # Chia tách Train - Val theo chỉ mục 80 - 10
+    train_mask = df_y["timestamp"] < pd.to_datetime("2025-01-01 00:00:00")
+    val_mask = (df_y["timestamp"] >= pd.to_datetime("2025-01-01 00:00:00")) & (df_y["timestamp"] < pd.to_datetime("2025-10-01 00:00:00"))
                       
     # Lọc tập Val Hà Nội để tối ưu hóa trực tiếp trên Hà Nội
-    df_val_hn = df_val[df_val["city"] == "hanoi"]
+    val_hn_mask = val_mask & (df_y["city"] == "hanoi")
     
-    X_train = df_train[feature_cols].copy()
-    y_train = df_train[y_cols].copy()
-    X_val_hn = df_val_hn[feature_cols].copy()
-    y_val_hn = df_val_hn[y_cols].copy()
+    X_train = df_feat.loc[valid_idx[train_mask], feature_cols].copy()
+    y_train = df_y.loc[valid_idx[train_mask], y_cols].copy()
+    X_val_hn = df_feat.loc[valid_idx[val_hn_mask], feature_cols].copy()
+    y_val_hn = df_y.loc[valid_idx[val_hn_mask], y_cols].copy()
     
-    # Giải phóng các dataframe trung gian ngay lập tức
-    del df_target
-    del df_clean
-    del df_train
-    del df_val
-    del df_val_hn
+    # Giải phóng dataframe phụ df_y ngay lập tức
+    del df_y
     import gc
     gc.collect()
     
@@ -201,9 +189,20 @@ if __name__ == "__main__":
     fe = FeatureEngineer()
     df_feat = fe.transform(df_raw)
     
+    # Ép kiểu float64 sang float32 để giảm tải RAM tối đa
+    float64_cols = df_feat.select_dtypes(include=["float64"]).columns
+    df_feat[float64_cols] = df_feat[float64_cols].astype("float32")
+    
     # Giải phóng raw data
     del df_raw
     import gc
+    gc.collect()
+    
+    # Ép kiểu danh mục (category) cho các cột phân loại trong df_feat
+    source_cols = ["pm25_source", "pm10_source", "no2_source", "so2_source", "co_source", "o3_source"]
+    for col in source_cols + ["station_id_encoded", "city"]:
+        if col in df_feat.columns:
+            df_feat[col] = df_feat[col].astype("category")
     gc.collect()
     
     if args.gas == "all":
