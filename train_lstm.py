@@ -37,7 +37,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
     Input, LSTM, Bidirectional, Dense, Dropout, LayerNormalization, Reshape
 )
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, CSVLogger
 from tensorflow.keras.optimizers import Adam
 
 # ══════════════════════════════════════════════════════════════════
@@ -348,6 +348,7 @@ else:
             "best_lstm_24h_model.keras",
             monitor="val_loss", save_best_only=True, verbose=0
         ),
+        CSVLogger("lstm_training_log.csv", append=False)
     ]
 
     history = model.fit(
@@ -357,6 +358,35 @@ else:
         callbacks=callbacks,
         verbose=1
     )
+
+    # Vẽ và lưu biểu đồ Learning Curve (Loss và MAE)
+    print("\n📈 Đang vẽ và lưu biểu đồ Learning Curve của LSTM...")
+    plt.figure(figsize=(12, 5))
+    
+    # Subplot 1: Loss (MSE)
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss (MSE)', color='#3b82f6', linewidth=2)
+    plt.plot(history.history['val_loss'], label='Val Loss (MSE)', color='#ef4444', linewidth=2)
+    plt.title('LSTM Training Loss (MSE)')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.5)
+    
+    # Subplot 2: MAE
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['mae'], label='Train MAE', color='#10b981', linewidth=2)
+    plt.plot(history.history['val_mae'], label='Val MAE', color='#f59e0b', linewidth=2)
+    plt.title('LSTM Training MAE')
+    plt.xlabel('Epochs')
+    plt.ylabel('MAE')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig("lstm_learning_curve.png", dpi=200, bbox_inches='tight')
+    plt.close()
+    print("✅ Đã lưu biểu đồ Learning Curve tại: lstm_learning_curve.png")
 
 # ══════════════════════════════════════════════════════════════════
 # 10. ĐÁNH GIÁ CHUẨN XÁC TRÊN TẬP TEST (Inverse Scaled)
