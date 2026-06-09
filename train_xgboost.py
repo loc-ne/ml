@@ -210,6 +210,7 @@ def main():
         
         print(f"   ⚙️ Đang huấn luyện và theo dõi quá trình học (Learning Curve) cho 24 horizons...")
         for h in range(1, 25):
+            print(f"      → [Horizon {h:02d}/24] Đang huấn luyện {disp_name} t+{h}...", flush=True)
             col_name = f"{target}_t+{h}"
             model_h = XGBRegressor(**params)
             
