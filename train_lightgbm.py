@@ -169,7 +169,10 @@ def main():
         gc.collect()
         
         # Cấu hình LightGBM: sử dụng bộ tối ưu từ Optuna nếu có, ngược lại dùng mặc định
-        best_params_path = f"models/lightgbm/best_params_{target}.json"
+        best_params_path = f"light/best_params_{target}.json"
+        if not os.path.exists(best_params_path):
+            best_params_path = f"models/lightgbm/best_params_{target}.json"
+            
         if os.path.exists(best_params_path):
             with open(best_params_path, "r", encoding="utf-8") as f:
                 params = json.load(f)
