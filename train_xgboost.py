@@ -59,8 +59,8 @@ TFT_RESULTS = {
 
 def load_and_combine_datasets():
     """Đọc dữ liệu Hà Nội và TP.HCM rồi gộp lại làm một giống như TFT."""
-    hn_path = "/kaggle/input/datasets/arisene/train-final/dataset_hanoi.parquet"
-    hcm_path = "/kaggle/input/datasets/arisene/train-final/dataset_hcmc.parquet"
+    hn_path = "/kaggle/input/datasets/nguynquclc/adhfahr/dataset_hanoi.parquet"
+    hcm_path = "/kaggle/input/datasets/nguynquclc/adhfahr/dataset_hcmc.parquet"
     
     if not os.path.exists(hn_path) or not os.path.exists(hcm_path):
         hn_path = "dataset_hanoi.parquet"
