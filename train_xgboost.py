@@ -99,13 +99,14 @@ def main():
     df_feat = fe.transform(df_raw)
     print(f"✅ Sinh đặc trưng hoàn thành! Kích thước dữ liệu mới: {df_feat.shape}\n")
     
-    # Ép kiểu float64 sang float32 để giảm tải RAM tối đa
+    # Ép kiểu float64 sang float32 từng cột một để tránh tạo bản sao lớn gây tràn RAM
     float64_cols = df_feat.select_dtypes(include=["float64"]).columns
-    df_feat[float64_cols] = df_feat[float64_cols].astype("float32")
+    for col in float64_cols:
+        df_feat[col] = df_feat[col].astype("float32")
+    gc.collect()
     
     # Giải phóng raw data ngay lập tức
     del df_raw
-    import gc
     gc.collect()
     
     # Ép kiểu danh mục (category) cho các cột phân loại trong df_feat
