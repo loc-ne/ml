@@ -36,8 +36,8 @@ def evaluate_model(checkpoint_path="models/tft-best-model.ckpt"):
     print("🚀 Bắt đầu tiến trình đánh giá mô hình TFT trên tập Test...")
     
     # 1. Đọc dữ liệu gốc
-    hn_path = "/kaggle/input/datasets/arisene/train-final/dataset_hanoi.parquet"
-    hcm_path = "/kaggle/input/datasets/arisene/train-final/dataset_hcmc.parquet"
+    hn_path = "/kaggle/input/datasets/nguynquclc/adhfahr/dataset_hanoi.parquet"
+    hcm_path = "/kaggle/input/datasets/nguynquclc/adhfahr/dataset_hcmc.parquet"
     
     if not os.path.exists(hn_path) or not os.path.exists(hcm_path):
         hn_path = "dataset_hanoi.parquet"
