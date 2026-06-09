@@ -109,11 +109,17 @@ def main():
             if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
                 feature_cols.append(c)
                 
+        # Bổ sung city vào features và cast thành category
+        if "city" in df_feat.columns:
+            feature_cols.append("city")
+                
         cols_to_keep = list(set(feature_cols + ["city", "station_id", "timestamp", target] + source_cols))
         cols_to_keep = [c for c in cols_to_keep if c in df_feat.columns]
         
         df_target = df_feat[cols_to_keep].copy()
-        for col in source_cols:
+        
+        # Ép kiểu danh mục (category) cho các cột phân loại để mô hình tối ưu nhánh chia
+        for col in source_cols + ["station_id_encoded", "city"]:
             if col in df_target.columns:
                 df_target[col] = df_target[col].astype("category")
                 

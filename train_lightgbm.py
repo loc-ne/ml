@@ -95,9 +95,12 @@ def main():
     df_feat = fe.transform(df_raw)
     print(f"✅ Sinh đặc trưng hoàn thành! Kích thước dữ liệu mới: {df_feat.shape}\n")
     
+    # Ép kiểu float64 sang float32 để giảm tải RAM tối đa
+    float64_cols = df_feat.select_dtypes(include=["float64"]).columns
+    df_feat[float64_cols] = df_feat[float64_cols].astype("float32")
+    
     # Giải phóng raw data ngay lập tức
     del df_raw
-    import gc
     gc.collect()
     
     comparison_table = []
@@ -123,13 +126,18 @@ def main():
             if dtype in [np.float32, np.float64, np.int32, np.int64, int, float] or dtype.name == "category":
                 feature_cols.append(c)
                 
+        # Bổ sung city vào features và cast thành category
+        if "city" in df_feat.columns:
+            feature_cols.append("city")
+                
         # Chỉ copy các cột thực sự cần dùng để giảm tải RAM tối đa
         cols_to_keep = list(set(feature_cols + ["city", "station_id", "timestamp", target] + source_cols))
         cols_to_keep = [c for c in cols_to_keep if c in df_feat.columns]
         
         df_target = df_feat[cols_to_keep].copy()
         
-        for col in source_cols:
+        # Ép kiểu danh mục (category) cho các cột phân loại để mô hình tối ưu nhánh chia
+        for col in source_cols + ["station_id_encoded", "city"]:
             if col in df_target.columns:
                 df_target[col] = df_target[col].astype("category")
                 
@@ -149,9 +157,8 @@ def main():
                           (df_clean["timestamp"] < pd.to_datetime("2025-10-01 00:00:00"))]
         df_test = df_clean[df_clean["timestamp"] >= pd.to_datetime("2025-10-01 00:00:00")]
         
-        # Lọc tập Val & Test riêng của HÀ NỘI để đối chiếu sòng phẳng
+        # Lọc tập Val Hà Nội (để theo dõi/đối chiếu) và tập Test Gộp (HN + HCM)
         df_val_hanoi = df_val[df_val["city"] == "hanoi"]
-        df_test_hanoi = df_test[df_test["city"] == "hanoi"]
         
         X_train = df_train[feature_cols].copy()
         y_train = df_train[y_cols].copy()
@@ -159,8 +166,8 @@ def main():
         X_val_hn = df_val_hanoi[feature_cols].copy()
         y_val_hn = df_val_hanoi[y_cols].copy()
         
-        X_test_hn = df_test_hanoi[feature_cols].copy()
-        y_test_hn = df_test_hanoi[y_cols].copy()
+        X_test_all = df_test[feature_cols].copy()
+        y_test_all = df_test[y_cols].copy()
         
         # Giải phóng các dataframe trung gian lớn
         del df_target
@@ -169,7 +176,6 @@ def main():
         del df_val
         del df_test
         del df_val_hanoi
-        del df_test_hanoi
         gc.collect()
         
         # Cấu hình LightGBM: sử dụng bộ tối ưu từ Optuna nếu có, ngược lại dùng mặc định
@@ -249,23 +255,25 @@ def main():
         joblib.dump(models, model_path)
         print(f"   💾 Đã lưu mô hình {disp_name} tại: {model_path}")
         
-        # Dự báo 24 bước tương lai trên tập Val & Test của Hà Nội
+        # Dự báo 24 bước tương lai trên tập Val Hà Nội và tập Test Gộp (HN + HCM)
         y_pred_val = np.zeros((len(X_val_hn), 24))
-        y_pred_test = np.zeros((len(X_test_hn), 24))
+        y_pred_test_all = np.zeros((len(X_test_all), 24))
         
         for idx, model_h in enumerate(models):
             y_pred_val[:, idx] = model_h.predict(X_val_hn)
-            y_pred_test[:, idx] = model_h.predict(X_test_hn)
+            y_pred_test_all[:, idx] = model_h.predict(X_test_all)
             
         y_pred_val = np.clip(y_pred_val, 0.0, None)
-        y_pred_test = np.clip(y_pred_test, 0.0, None)
+        y_pred_test_all = np.clip(y_pred_test_all, 0.0, None)
         
-        # Tính toán sai số trung bình trên Hà Nội
+        # Tính toán sai số trung bình
         mae_val = mean_absolute_error(y_val_hn, y_pred_val)
         rmse_val = np.sqrt(mean_squared_error(y_val_hn, y_pred_val))
         
-        mae_test = mean_absolute_error(y_test_hn, y_pred_test)
-        rmse_test = np.sqrt(mean_squared_error(y_test_hn, y_pred_test))
+        mae_test = mean_absolute_error(y_test_all, y_pred_test_all)
+        rmse_test = np.sqrt(mean_squared_error(y_test_all, y_pred_test_all))
+        from sklearn.metrics import r2_score
+        r2_test = r2_score(y_test_all.values.flatten(), y_pred_test_all.flatten())
         
         # Lấy kết quả đối chiếu của TFT
         tft_mae = TFT_RESULTS[disp_name]["mae"]
@@ -275,44 +283,43 @@ def main():
             "Gas": disp_name,
             "LGBM_VAL_MAE": mae_val,
             "LGBM_TEST_MAE": mae_test,
-            "TFT_MAE": tft_mae,
-            "LGBM_VAL_RMSE": rmse_val,
             "LGBM_TEST_RMSE": rmse_test,
+            "LGBM_TEST_R2": r2_test,
+            "TFT_MAE": tft_mae,
             "TFT_RMSE": tft_rmse,
         })
         
-        print(f"   📊 Kết quả trung bình 24h tại Hà Nội (Sử dụng {len(feature_cols)} đặc trưng nâng cao):")
-        print(f"      - LightGBM Val  (2025/01-2025/09): MAE = {mae_val:.2f} | RMSE = {rmse_val:.2f}")
-        print(f"      - LightGBM Test (2025/10-2026/04): MAE = {mae_test:.2f} | RMSE = {rmse_test:.2f} 🌟")
-        print(f"      - TFT Model (Best - Full 20%):     MAE = {tft_mae:.2f} | RMSE = {tft_rmse:.2f}")
+        print(f"   📊 Kết quả trung bình 24h trên TẬP TEST GỘP HN+HCM (Sử dụng {len(feature_cols)} đặc trưng nâng cao):")
+        print(f"      - LightGBM Val Hà Nội: MAE = {mae_val:.2f} | RMSE = {rmse_val:.2f}")
+        print(f"      - LightGBM Test Gộp:   MAE = {mae_test:.2f} | RMSE = {rmse_test:.2f} | R² = {r2_test:.3f} 🌟")
+        print(f"      - TFT Model (Best):    MAE = {tft_mae:.2f} | RMSE = {tft_rmse:.2f}")
         
         # Giải phóng dữ liệu huấn luyện của khí hiện tại để chuẩn bị cho khí tiếp theo
         del X_train
         del y_train
         del X_val_hn
         del y_val_hn
-        del X_test_hn
-        del y_test_hn
+        del X_test_all
+        del y_test_all
         gc.collect()
         
-    # ── IN BẢNG ĐỐI CHIẾU TỔNG HỢP ──────────────────────────────────────────
-    print("\n" + "═" * 125)
-    print("📊 BẢNG TỔNG HỢP ĐỐI CHIẾU HIỆU NĂNG TRÊN TẬP VAL & TEST HÀ NỘI")
-    print("═" * 125)
-    print(f"{'Chất khí':<10} | {'LGBM VAL MAE':<13} | {'LGBM TEST MAE':<14} | {'TFT MAE (20%)':<14} | {'LGBM VAL RMSE':<14} | {'LGBM TEST RMSE':<15} | {'TFT RMSE (20%)':<15}")
-    print("-" * 125)
+    # ── IN BẢNG ĐỐI CHIẾU TỔNG HỢP VÀ GHI FILE ──────────────────────────────────────────
+    output_lines = []
+    output_lines.append("=" * 90)
+    output_lines.append("📊 BẢNG TỔNG HỢP HIỆU NĂNG LIGHTGBM TRÊN TẬP TEST 10% (HN + HCM)")
+    output_lines.append("=" * 90)
+    output_lines.append(f"{'Chất khí':<10} | {'LGBM MAE':<12} {'LGBM RMSE':<12} {'LGBM R²':<12} | {'TFT MAE':<12} {'TFT RMSE':<12}")
+    output_lines.append("-" * 90)
     for row in comparison_table:
-        print(f"{row['Gas']:<10} | "
-              f"{row['LGBM_VAL_MAE']:<13.2f} | "
-              f"{row['LGBM_TEST_MAE']:<14.2f} | "
-              f"{row['TFT_MAE']:<14.2f} | "
-              f"{row['LGBM_VAL_RMSE']:<13.2f} | "
-              f"{row['LGBM_TEST_RMSE']:<15.2f} | "
-              f"{row['TFT_RMSE']:<15.2f}")
-    print("═" * 125)
-    print("👉 Nhận xét: LightGBM mới được bổ sung 250 đặc trưng nâng cao và chia tập 80-10-10.")
-    print("   Bộ siêu tham số tối ưu từ Optuna giúp cải thiện đáng kể so với mô hình gốc.")
-    print("═" * 125)
+        output_lines.append(f"{row['Gas']:<10} | {row['LGBM_TEST_MAE']:<12.2f} {row['LGBM_TEST_RMSE']:<12.2f} {row['LGBM_TEST_R2']:<12.3f} | {row['TFT_MAE']:<12.2f} {row['TFT_RMSE']:<12.2f}")
+    output_lines.append("=" * 90)
+    
+    output_text = "\n".join(output_lines)
+    print("\n" + output_text)
+    
+    with open("lgbm_test_results.txt", "w", encoding="utf-8") as f:
+        f.write(output_text)
+    print("  → Đã lưu kết quả đánh giá vào file: lgbm_test_results.txt")
 
     # 4. Vẽ và lưu biểu đồ gộp 6 chất khí (2 hàng, 3 cột)
     if all_losses:
