@@ -146,27 +146,34 @@ def main():
     model = TemporalFusionTransformer.load_from_checkpoint(checkpoint_path).to(device)
     model.eval()
     
-    # 4. Trích xuất metadata khớp thời gian
-    test_timestamps = []
-    test_cities = []
-    test_stations = []
-    test_weather_data = []
+    # 4. Trích xuất metadata khớp thời gian (Tối ưu hóa bằng Vectorized Merge chỉ mất < 1 giây)
+    print("⏳ Đang trích xuất metadata khớp thời gian dự báo t+12...")
+    df_index_test = test_dataset.decoded_index.copy()
+    df_index_test["pred_time_idx"] = df_index_test["time_idx_first_prediction"] + 11
     
-    df_index_test = test_dataset.decoded_index
-    for _, row in df_index_test.iterrows():
-        pred_time_idx = row["time_idx_first_prediction"] + 11 # t+12
-        meta_row = df[(df["station_id"] == row["station_id"]) & (df["time_idx"] == pred_time_idx)]
-        if len(meta_row) > 0:
-            meta = meta_row.iloc[0]
-            test_timestamps.append(meta["timestamp"])
-            test_cities.append(meta["city"])
-            test_stations.append(meta["station_id"])
-            test_weather_data.append((
-                float(meta["temp_c"]) if "temp_c" in df.columns else 0.0,
-                float(meta["wind_speed_ms"]) if "wind_speed_ms" in df.columns else 0.0,
-                float(meta["dew_point_spread"]) if "dew_point_spread" in df.columns else 0.0,
-                int(float(meta["is_peak_traffic"])) if "is_peak_traffic" in df.columns else 0
-            ))
+    # Chỉ giữ các cột cần thiết từ df để merge tăng tốc độ
+    weather_cols = ["temp_c", "wind_speed_ms", "dew_point_spread", "is_peak_traffic"]
+    keep_cols = ["station_id", "time_idx", "timestamp", "city"] + [c for c in weather_cols if c in df.columns]
+    df_lookup = df[keep_cols].copy()
+    
+    df_merged = df_index_test.merge(
+        df_lookup,
+        left_on=["station_id", "pred_time_idx"],
+        right_on=["station_id", "time_idx"],
+        how="left"
+    )
+    
+    test_timestamps = df_merged["timestamp"].tolist()
+    test_cities = df_merged["city"].tolist()
+    test_stations = df_merged["station_id"].tolist()
+    
+    temp_list = df_merged["temp_c"].fillna(0.0).astype(float).tolist() if "temp_c" in df_merged.columns else [0.0]*len(df_merged)
+    wind_list = df_merged["wind_speed_ms"].fillna(0.0).astype(float).tolist() if "wind_speed_ms" in df_merged.columns else [0.0]*len(df_merged)
+    dew_list = df_merged["dew_point_spread"].fillna(0.0).astype(float).tolist() if "dew_point_spread" in df_merged.columns else [0.0]*len(df_merged)
+    peak_list = df_merged["is_peak_traffic"].fillna(0.0).astype(float).astype(int).tolist() if "is_peak_traffic" in df_merged.columns else [0]*len(df_merged)
+    
+    test_weather_data = list(zip(temp_list, wind_list, dew_list, peak_list))
+    print("✅ Đã trích xuất metadata xong!")
             
     # 5. Chạy dự báo
     all_preds = [[] for _ in range(6)]
