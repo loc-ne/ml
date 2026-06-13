@@ -158,8 +158,8 @@ def main():
     
     df_merged = df_index_test.merge(
         df_lookup,
-        left_on=["station_id", "pred_time_idx"],
-        right_on=["station_id", "time_idx"],
+        left_on=["city", "station_id", "pred_time_idx"],
+        right_on=["city", "station_id", "time_idx"],
         how="left"
     )
     
