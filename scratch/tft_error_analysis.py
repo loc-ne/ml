@@ -172,8 +172,9 @@ def main():
     all_preds = [[] for _ in range(6)]
     all_actuals = [[] for _ in range(6)]
     
+    from tqdm import tqdm
     with torch.no_grad():
-        for batch in test_dataloader:
+        for batch in tqdm(test_dataloader, desc="Đang dự báo"):
             x, y = batch
             x_device = to_device(x, device)
             out = model(x_device)
