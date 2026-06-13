@@ -11,6 +11,8 @@ Kịch bản độc lập chạy phân tích lỗi cho mô hình Temporal Fusion
 import os
 import sys
 import gc
+import warnings
+warnings.filterwarnings("ignore")
 import pickle
 import numpy as np
 import pandas as pd
